@@ -1,32 +1,173 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
-import { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { 
   HelpCircle, 
-  Briefcase, 
   MessageCircle, 
-  Star, 
-  Shield, 
   Phone, 
   Mail,
   ChevronDown,
   ChevronUp,
   Bell,
   Package,
-  Truck,
   Users,
   Facebook,
   Instagram,
-  Twitter
+  Twitter,
+  Clock,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  History
 } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
 
 export default function AjudaScreen() {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedCorrida, setSelectedCorrida] = useState<any>(null);
+  const [corridasDisponiveis, setCorridasDisponiveis] = useState<any[]>([]);
+  const [nomeObjeto, setNomeObjeto] = useState('');
+  const [descricaoObjeto, setDescricaoObjeto] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [carregandoCorridas, setCarregandoCorridas] = useState(false);
+  const [chamadosExistentes, setChamadosExistentes] = useState<any[]>([]);
+  const [mostrarHistorico, setMostrarHistorico] = useState(false);
+  const [passageiro, setPassageiro] = useState<any>(null);
+
+  // Buscar dados do passageiro
+  const buscarPassageiro = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: passageiroData } = await supabase
+        .from('passageiros')
+        .select('id')
+        .eq('usuario_id', user.id)
+        .single();
+      
+      setPassageiro(passageiroData);
+      return passageiroData;
+    } catch (error) {
+      console.error('Erro ao carregar passageiro:', error);
+      return null;
+    }
+  };
+
+  // Buscar corridas do passageiro
+  const buscarCorridasParaObjeto = async () => {
+    setCarregandoCorridas(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Erro', 'Usuário não autenticado');
+        return;
+      }
+
+      // Buscar passageiro se não tiver
+      let passageiroData = passageiro;
+      if (!passageiroData) {
+        passageiroData = await buscarPassageiro();
+      }
+
+      if (!passageiroData) {
+        Alert.alert('Erro', 'Perfil de passageiro não encontrado');
+        return;
+      }
+
+      // Buscar corridas finalizadas dos últimos 7 dias
+      const seteDiasAtras = new Date();
+      seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
+
+      const { data: corridas, error } = await supabase
+        .from('corridas')
+        .select(`
+          id,
+          origem_endereco,
+          destino_endereco,
+          data_finalizacao,
+          valor_final,
+          motorista_id,
+          distancia_km,
+          duracao_estimada
+        `)
+        .eq('passageiro_id', passageiroData.id)
+        .eq('status', 'finalizada')
+        .gte('data_finalizacao', seteDiasAtras.toISOString())
+        .order('data_finalizacao', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      // Calcular horas desde a corrida e adicionar dados do motorista
+      const corridasComHoras = await Promise.all((corridas || []).map(async (corrida) => {
+        const dataFinalizacao = new Date(corrida.data_finalizacao);
+        const agora = new Date();
+        const horasDiff = (agora.getTime() - dataFinalizacao.getTime()) / (1000 * 60 * 60);
+        
+        // Buscar nome do motorista
+        let motoristaNome = 'Motorista';
+        if (corrida.motorista_id) {
+          const { data: motorista } = await supabase
+            .from('motoristas')
+            .select(`
+              id,
+              usuarios (
+                nome_completo
+              )
+            `)
+            .eq('id', corrida.motorista_id)
+            .single();
+          
+          if (motorista?.usuarios) {
+            motoristaNome = motorista.usuarios.nome_completo;
+          }
+        }
+        
+        return {
+          ...corrida,
+          motorista_nome: motoristaNome,
+          horas_desde_corrida: horasDiff,
+          pode_solicitar: horasDiff <= 48,
+          esta_atrasado: horasDiff > 24 && horasDiff <= 48
+        };
+      }));
+
+      setCorridasDisponiveis(corridasComHoras);
+
+      // Buscar chamados já existentes
+      const { data: chamados } = await supabase
+        .from('objetos_perdidos')
+        .select('*')
+        .eq('passageiro_id', passageiroData.id)
+        .order('criado_em', { ascending: false });
+
+      setChamadosExistentes(chamados || []);
+      
+    } catch (error: any) {
+      console.error('Erro ao buscar corridas:', error);
+      Alert.alert('Erro', error.message || 'Não foi possível carregar suas corridas');
+    } finally {
+      setCarregandoCorridas(false);
+    }
+  };
+
+  // Carregar dados quando a tela ganhar foco
+  useFocusEffect(
+    useCallback(() => {
+      buscarPassageiro();
+    }, [])
+  );
 
   const toggleSection = (section: string) => {
     if (expandedSection === section) {
       setExpandedSection(null);
     } else {
       setExpandedSection(section);
+      if (section === 'lost') {
+        buscarCorridasParaObjeto();
+      }
     }
   };
 
@@ -36,6 +177,129 @@ export default function AjudaScreen() {
 
   const handleEmail = (email: string) => {
     Linking.openURL(`mailto:${email}`);
+  };
+
+  const abrirModalChamado = () => {
+    if (corridasDisponiveis.filter(c => c.pode_solicitar).length === 0) {
+      Alert.alert(
+        'Nenhuma corrida disponível',
+        'Você não possui corridas recentes (menos de 48h) para solicitar objetos perdidos.'
+      );
+      return;
+    }
+    setSelectedCorrida(null);
+    setModalVisible(true);
+  };
+
+  const selecionarCorrida = (corrida: any) => {
+    if (!corrida.pode_solicitar) {
+      Alert.alert(
+        'Prazo Expirado',
+        'Não é possível solicitar objeto perdido para corridas com mais de 48 horas.'
+      );
+      return;
+    }
+    
+    const chamadoExistente = chamadosExistentes.find(c => c.corrida_id === corrida.id);
+    
+    if (chamadoExistente) {
+      Alert.alert(
+        'Chamado já existe',
+        `Você já possui um chamado para esta corrida. Status: ${getStatusText(chamadoExistente.status)}`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    setSelectedCorrida(corrida);
+  };
+
+  const enviarChamadoObjeto = async () => {
+    if (!selectedCorrida) {
+      Alert.alert('Atenção', 'Selecione uma corrida primeiro');
+      return;
+    }
+
+    if (!nomeObjeto.trim()) {
+      Alert.alert('Atenção', 'Por favor, descreva o objeto perdido');
+      return;
+    }
+
+    if (!passageiro) {
+      Alert.alert('Erro', 'Perfil não encontrado. Faça login novamente.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('objetos_perdidos')
+        .insert({
+          corrida_id: selectedCorrida.id,
+          passageiro_id: passageiro.id,
+          motorista_id: selectedCorrida.motorista_id,
+          nome_objeto: nomeObjeto.trim(),
+          descricao: descricaoObjeto.trim() || null,
+          status: 'pendente'
+        });
+
+      if (error) throw error;
+
+      Alert.alert(
+        'Chamado aberto com sucesso!',
+        'Entraremos em contato com o motorista para localizar seu objeto. Acompanhe o status no histórico de chamados.'
+      );
+      
+      setModalVisible(false);
+      setNomeObjeto('');
+      setDescricaoObjeto('');
+      setSelectedCorrida(null);
+      
+      await buscarCorridasParaObjeto();
+      
+    } catch (error: any) {
+      console.error('Erro ao criar chamado:', error);
+      Alert.alert('Erro', error.message || 'Não foi possível abrir o chamado');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pendente':
+        return <Clock size={16} color="#F59E0B" />;
+      case 'em_andamento':
+        return <AlertCircle size={16} color="#2563EB" />;
+      case 'resolvido':
+        return <CheckCircle size={16} color="#10B981" />;
+      case 'cancelado':
+        return <XCircle size={16} color="#EF4444" />;
+      default:
+        return <HelpCircle size={16} color="#6B7280" />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    const statusMap: Record<string, string> = {
+      'pendente': 'Pendente',
+      'em_andamento': 'Em andamento',
+      'resolvido': 'Resolvido',
+      'cancelado': 'Cancelado'
+    };
+    return statusMap[status] || status;
+  };
+
+  const formatarData = (dataISO: string) => {
+    return new Date(dataISO).toLocaleString('pt-BR');
+  };
+
+  const formatarHoras = (horas: number) => {
+    if (horas < 1) {
+      const minutos = Math.floor(horas * 60);
+      return `${minutos} minutos atrás`;
+    }
+    return `${Math.floor(horas)} horas atrás`;
   };
 
   return (
@@ -68,14 +332,37 @@ export default function AjudaScreen() {
               Não se preocupe! Estamos aqui para te ajudar a recuperar seus pertences.
             </Text>
             
+            {/* Regras de prazo */}
+            <View style={styles.prazoContainer}>
+              <Text style={styles.prazoTitulo}>⏰ Prazos para solicitação:</Text>
+              <View style={styles.prazoItem}>
+                <CheckCircle size={18} color="#10B981" />
+                <Text style={styles.prazoText}>
+                  <Text style={styles.prazoDestaque}>Até 24 horas:</Text> Solicitação normal
+                </Text>
+              </View>
+              <View style={styles.prazoItem}>
+                <AlertCircle size={18} color="#F59E0B" />
+                <Text style={styles.prazoText}>
+                  <Text style={styles.prazoDestaque}>24h - 48h:</Text> Solicitação com atraso
+                </Text>
+              </View>
+              <View style={styles.prazoItem}>
+                <XCircle size={18} color="#EF4444" />
+                <Text style={styles.prazoText}>
+                  <Text style={styles.prazoDestaque}>Após 48h:</Text> Não é possível solicitar
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.stepContainer}>
               <View style={styles.stepNumber}>
                 <Text style={styles.stepNumberText}>1</Text>
               </View>
               <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Acesse o histórico de corridas</Text>
+                <Text style={styles.stepTitle}>Selecione a corrida</Text>
                 <Text style={styles.stepDescription}>
-                  Vá até a seção "Histórico" e encontre a corrida onde o objeto foi esquecido
+                  Escolha a corrida onde você esqueceu o objeto
                 </Text>
               </View>
             </View>
@@ -85,9 +372,9 @@ export default function AjudaScreen() {
                 <Text style={styles.stepNumberText}>2</Text>
               </View>
               <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Entre em contato com o motorista</Text>
+                <Text style={styles.stepTitle}>Descreva o objeto</Text>
                 <Text style={styles.stepDescription}>
-                  Utilize o botão "Contatar Motorista" disponível nos detalhes da corrida
+                  Informe qual objeto foi esquecido e detalhes para identificação
                 </Text>
               </View>
             </View>
@@ -97,20 +384,212 @@ export default function AjudaScreen() {
                 <Text style={styles.stepNumberText}>3</Text>
               </View>
               <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Reporte ao suporte</Text>
+                <Text style={styles.stepTitle}>Acompanhe o status</Text>
                 <Text style={styles.stepDescription}>
-                  Se não conseguir contato, abra um chamado no nosso suporte com os detalhes do ocorrido
+                  O motorista será notificado e você poderá acompanhar o andamento
                 </Text>
               </View>
             </View>
 
-            <TouchableOpacity style={styles.contactButton}>
+            <TouchableOpacity 
+              style={styles.contactButton}
+              onPress={abrirModalChamado}
+            >
               <MessageCircle size={20} color="#FFF" />
               <Text style={styles.contactButtonText}>Abrir Chamado de Objeto Perdido</Text>
             </TouchableOpacity>
+
+            {chamadosExistentes.length > 0 && (
+              <TouchableOpacity 
+                style={styles.historicoButton}
+                onPress={() => setMostrarHistorico(!mostrarHistorico)}
+              >
+                <History size={20} color="#2563EB" />
+                <Text style={styles.historicoButtonText}>
+                  {mostrarHistorico ? 'Ocultar' : 'Ver'} Histórico de Chamados ({chamadosExistentes.length})
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {mostrarHistorico && chamadosExistentes.map((chamado) => (
+              <View key={chamado.id} style={styles.historicoItem}>
+                <View style={styles.historicoHeader}>
+                  {getStatusIcon(chamado.status)}
+                  <Text style={styles.historicoStatus}>{getStatusText(chamado.status)}</Text>
+                </View>
+                <Text style={styles.historicoObjeto}>📦 {chamado.nome_objeto}</Text>
+                {chamado.descricao && (
+                  <Text style={styles.historicoDescricao}>📝 {chamado.descricao}</Text>
+                )}
+                <Text style={styles.historicoData}>
+                  🗓️ Aberto em: {formatarData(chamado.criado_em)}
+                </Text>
+              </View>
+            ))}
           </View>
         )}
       </View>
+
+      {/* Modal para criar chamado */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => {
+          setModalVisible(false);
+          setSelectedCorrida(null);
+          setNomeObjeto('');
+          setDescricaoObjeto('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {!selectedCorrida ? 'Selecionar Corrida' : 'Descrever Objeto'}
+            </Text>
+            
+            {!selectedCorrida ? (
+              <>
+                <Text style={styles.modalSubtitle}>Selecione a corrida onde perdeu o objeto:</Text>
+                {carregandoCorridas ? (
+                  <ActivityIndicator size="large" color="#2563EB" style={styles.loader} />
+                ) : (
+                  <ScrollView style={styles.corridasList}>
+                    {corridasDisponiveis.map((corrida) => (
+                      <TouchableOpacity
+                        key={corrida.id}
+                        style={[
+                          styles.corridaItem,
+                          !corrida.pode_solicitar && styles.corridaItemDisabled
+                        ]}
+                        onPress={() => selecionarCorrida(corrida)}
+                        disabled={!corrida.pode_solicitar}
+                      >
+                        <View style={styles.corridaInfo}>
+                          <Text style={styles.corridaOrigem}>
+                            📍 {corrida.origem_endereco?.substring(0, 50)}...
+                          </Text>
+                          <Text style={styles.corridaDestino}>
+                            🎯 {corrida.destino_endereco?.substring(0, 50)}...
+                          </Text>
+                          <Text style={styles.corridaData}>
+                            🗓️ {formatarData(corrida.data_finalizacao)}
+                          </Text>
+                          <Text style={styles.corridaMotorista}>
+                            👤 {corrida.motorista_nome}
+                          </Text>
+                          <View style={styles.corridaDetalhes}>
+                            <Text style={styles.corridaDistancia}>📏 {corrida.distancia_km?.toFixed(1)} km</Text>
+                            <Text style={styles.corridaValor}>💰 R$ {corrida.valor_final?.toFixed(2)}</Text>
+                          </View>
+                          {corrida.esta_atrasado && (
+                            <View style={styles.atrasoBadge}>
+                              <AlertCircle size={12} color="#F59E0B" />
+                              <Text style={styles.atrasoText}>Solicitação com atraso</Text>
+                            </View>
+                          )}
+                          <Text style={[
+                            styles.corridaHoras,
+                            !corrida.pode_solicitar && styles.textoVermelho
+                          ]}>
+                            ⏰ {formatarHoras(corrida.horas_desde_corrida)}
+                            {!corrida.pode_solicitar && ' - Prazo expirado'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                    {corridasDisponiveis.length === 0 && !carregandoCorridas && (
+                      <View style={styles.semCorridasContainer}>
+                        <Package size={48} color="#9CA3AF" />
+                        <Text style={styles.semCorridasText}>
+                          Nenhuma corrida finalizada encontrada nos últimos 7 dias.
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                )}
+              </>
+            ) : (
+              <>
+                <TouchableOpacity onPress={() => setSelectedCorrida(null)} style={styles.voltarButton}>
+                  <ChevronUp size={20} color="#2563EB" />
+                  <Text style={styles.voltarButtonText}>Voltar para seleção de corrida</Text>
+                </TouchableOpacity>
+                
+                <View style={styles.corridaSelecionadaCard}>
+                  <Text style={styles.corridaSelecionadaLabel}>Corrida selecionada:</Text>
+                  <Text style={styles.corridaSelecionadaData}>
+                    {formatarData(selectedCorrida.data_finalizacao)}
+                  </Text>
+                  <Text style={styles.corridaSelecionadaEndereco}>
+                    📍 {selectedCorrida.origem_endereco?.substring(0, 60)}...
+                  </Text>
+                  <Text style={styles.corridaSelecionadaMotorista}>
+                    👤 Motorista: {selectedCorrida.motorista_nome}
+                  </Text>
+                </View>
+                
+                <Text style={styles.modalSubtitle}>Descreva o objeto perdido:</Text>
+                
+                <TextInput
+                  style={styles.input}
+                  placeholder="Nome do objeto * (ex: Celular, Carteira, Chaves)"
+                  placeholderTextColor="#9CA3AF"
+                  value={nomeObjeto}
+                  onChangeText={setNomeObjeto}
+                />
+                
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Descrição detalhada (cor, marca, características importantes)"
+                  placeholderTextColor="#9CA3AF"
+                  value={descricaoObjeto}
+                  onChangeText={setDescricaoObjeto}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+                
+                {selectedCorrida.esta_atrasado && (
+                  <View style={styles.avisoAtraso}>
+                    <AlertCircle size={20} color="#F59E0B" />
+                    <Text style={styles.avisoAtrasoText}>
+                      ⚠️ Esta solicitação está sendo feita com atraso (entre 24h e 48h da corrida). 
+                      Ainda é possível solicitar, mas o processo pode ser mais demorado.
+                    </Text>
+                  </View>
+                )}
+                
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonCancel]}
+                    onPress={() => {
+                      setModalVisible(false);
+                      setSelectedCorrida(null);
+                      setNomeObjeto('');
+                      setDescricaoObjeto('');
+                    }}
+                  >
+                    <Text style={styles.modalButtonCancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonConfirm]}
+                    onPress={enviarChamadoObjeto}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <Text style={styles.modalButtonConfirmText}>Enviar Chamado</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Seção 2: Dúvidas Frequentes */}
       <View style={styles.section}>
@@ -156,108 +635,18 @@ export default function AjudaScreen() {
                 Em horários de alta demanda, os preços podem aumentar para incentivar mais motoristas a ficarem disponíveis.
               </Text>
             </View>
-          </View>
-        )}
-      </View>
 
-      {/* Seção 3: Novidades Futuras */}
-      <View style={styles.section}>
-        <TouchableOpacity 
-          style={styles.sectionHeader} 
-          onPress={() => toggleSection('news')}
-        >
-          <Bell size={24} color="#2563EB" />
-          <Text style={styles.sectionTitle}>Novidades Futuras</Text>
-          {expandedSection === 'news' ? (
-            <ChevronUp size={20} color="#6B7280" />
-          ) : (
-            <ChevronDown size={20} color="#6B7280" />
-          )}
-        </TouchableOpacity>
-        
-        {expandedSection === 'news' && (
-          <View style={styles.sectionContent}>
-            <View style={styles.newsItem}>
-              <Text style={styles.newsTitle}>🚀 BoraALL VIP</Text>
-              <Text style={styles.newsDescription}>
-                Programa de fidelidade com descontos exclusivos e benefícios para usuários frequentes. Lançamento em breve!
-              </Text>
-            </View>
-
-            <View style={styles.newsItem}>
-              <Text style={styles.newsTitle}>🔋 Frota Elétrica</Text>
-              <Text style={styles.newsDescription}>
-                Expansão da frota com veículos elétricos para reduzir emissões de carbono e oferecer corridas mais sustentáveis.
-              </Text>
-            </View>
-
-            <View style={styles.newsItem}>
-              <Text style={styles.newsTitle}>👨‍👩‍👧‍👦 BoraALL Família</Text>
-              <Text style={styles.newsDescription}>
-                Modalidade exclusiva com cadeirinhas e espaço para toda a família viajar com segurança.
-              </Text>
-            </View>
-
-            <View style={styles.newsItem}>
-              <Text style={styles.newsTitle}>📦 BoraALL Entrega</Text>
-              <Text style={styles.newsDescription}>
-                Serviço de entregas rápidas para encomendas e documentos na sua cidade.
+            <View style={styles.faqItem}>
+              <Text style={styles.faqQuestion}>❓ Como recuperar um objeto esquecido?</Text>
+              <Text style={styles.faqAnswer}>
+                Acesse a seção "Esqueceu um objeto" acima, selecione a corrida e abra um chamado. Você pode solicitar apenas dentro de 48 horas após a corrida.
               </Text>
             </View>
           </View>
         )}
       </View>
 
-      {/* Seção 4: Parcerias */}
-      <View style={styles.section}>
-        <TouchableOpacity 
-          style={styles.sectionHeader} 
-          onPress={() => toggleSection('partners')}
-        >
-          <Users size={24} color="#2563EB" />
-          <Text style={styles.sectionTitle}>Parceiros</Text>
-          {expandedSection === 'partners' ? (
-            <ChevronUp size={20} color="#6B7280" />
-          ) : (
-            <ChevronDown size={20} color="#6B7280" />
-          )}
-        </TouchableOpacity>
-        
-        {expandedSection === 'partners' && (
-          <View style={styles.sectionContent}>
-            <Text style={styles.text}>
-              Nossos parceiros que tornam a experiência BoraALL ainda melhor:
-            </Text>
-
-            <View style={styles.partnerCard}>
-              <Text style={styles.partnerName}>🏨 Hotéis BoraALL</Text>
-              <Text style={styles.partnerDescription}>
-                Desconto especial em hotéis parceiros para usuários do app
-              </Text>
-            </View>
-
-            <View style={styles.partnerCard}>
-              <Text style={styles.partnerName}>✈️ BoraALL Viagens</Text>
-              <Text style={styles.partnerDescription}>
-                Parceria com agências de viagem para transfers executivos
-              </Text>
-            </View>
-
-            <View style={styles.partnerCard}>
-              <Text style={styles.partnerName}>💳 BoraALL Bank</Text>
-              <Text style={styles.partnerDescription}>
-                Cartão de crédito com cashback em todas as corridas
-              </Text>
-            </View>
-
-            <TouchableOpacity style={styles.partnerButton}>
-              <Text style={styles.partnerButtonText}>Seja um parceiro →</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {/* Seção 5: Contato */}
+      {/* Seção 3: Contato */}
       <View style={styles.contactSection}>
         <Text style={styles.contactTitle}>Precisa de ajuda urgente?</Text>
         
@@ -268,10 +657,9 @@ export default function AjudaScreen() {
 
         <TouchableOpacity style={styles.emailButton} onPress={() => handleEmail('suporte@boraall.com')}>
           <Mail size={20} color="#2563EB" />
-          <Text style={styles.emailButtonText}>suporte@boraall.com</Text>
+          <Text style={styles.emailButtonText}>suporte@BoraAli.com</Text>
         </TouchableOpacity>
 
-        {/* Redes Sociais */}
         <View style={styles.socialContainer}>
           <Text style={styles.socialTitle}>Siga-nos nas redes</Text>
           <View style={styles.socialIcons}>
@@ -288,8 +676,7 @@ export default function AjudaScreen() {
         </View>
       </View>
 
-      {/* Versão do App */}
-      <Text style={styles.version}>BoraALL v2.29.05</Text>
+      <Text style={styles.version}>BoraAli v2.07.02</Text>
     </ScrollView>
   );
 }
@@ -355,6 +742,34 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 16,
   },
+  prazoContainer: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  prazoTitulo: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E40AF',
+    marginBottom: 8,
+  },
+  prazoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  prazoText: {
+    fontSize: 12,
+    color: '#4B5563',
+  },
+  prazoDestaque: {
+    fontWeight: '600',
+    color: '#1F2937',
+  },
   stepContainer: {
     flexDirection: 'row',
     marginBottom: 20,
@@ -402,6 +817,251 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  historicoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    gap: 8,
+  },
+  historicoButtonText: {
+    color: '#2563EB',
+    fontWeight: '500',
+    fontSize: 14,
+  },
+  historicoItem: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  historicoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  historicoStatus: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  historicoObjeto: {
+    fontSize: 14,
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  historicoDescricao: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  historicoData: {
+    fontSize: 11,
+    color: '#9CA3AF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    width: '90%',
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1F2937',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4B5563',
+    marginBottom: 12,
+  },
+  loader: {
+    marginVertical: 30,
+  },
+  corridasList: {
+    maxHeight: 400,
+  },
+  corridaItem: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#FFF',
+  },
+  corridaItemDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#F3F4F6',
+  },
+  corridaInfo: {
+    gap: 6,
+  },
+  corridaOrigem: {
+    fontSize: 13,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  corridaDestino: {
+    fontSize: 13,
+    color: '#4B5563',
+  },
+  corridaData: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  corridaMotorista: {
+    fontSize: 11,
+    color: '#2563EB',
+  },
+  corridaDetalhes: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  corridaDistancia: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  corridaValor: {
+    fontSize: 11,
+    color: '#10B981',
+    fontWeight: '500',
+  },
+  corridaHoras: {
+    fontSize: 11,
+    color: '#EF4444',
+    fontWeight: '500',
+  },
+  textoVermelho: {
+    color: '#EF4444',
+  },
+  atrasoBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  atrasoText: {
+    fontSize: 10,
+    color: '#F59E0B',
+  },
+  semCorridasContainer: {
+    alignItems: 'center',
+    padding: 30,
+    gap: 12,
+  },
+  semCorridasText: {
+    textAlign: 'center',
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  voltarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  voltarButtonText: {
+    color: '#2563EB',
+    fontSize: 13,
+  },
+  corridaSelecionadaCard: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  corridaSelecionadaLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  corridaSelecionadaData: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  corridaSelecionadaEndereco: {
+    fontSize: 12,
+    color: '#4B5563',
+    marginBottom: 2,
+  },
+  corridaSelecionadaMotorista: {
+    fontSize: 12,
+    color: '#2563EB',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#1F2937',
+    marginBottom: 12,
+  },
+  textArea: {
+    minHeight: 80,
+  },
+  avisoAtraso: {
+    flexDirection: 'row',
+    backgroundColor: '#FEF3C7',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    gap: 8,
+  },
+  avisoAtrasoText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#F59E0B',
+    lineHeight: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#F3F4F6',
+  },
+  modalButtonCancelText: {
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#2563EB',
+  },
+  modalButtonConfirmText: {
+    color: '#FFF',
+    fontWeight: '600',
+  },
   faqItem: {
     marginBottom: 20,
   },
@@ -415,53 +1075,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
     lineHeight: 18,
-  },
-  newsItem: {
-    marginBottom: 20,
-    padding: 12,
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  newsTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#2563EB',
-    marginBottom: 6,
-  },
-  newsDescription: {
-    fontSize: 13,
-    color: '#4B5563',
-    lineHeight: 18,
-  },
-  partnerCard: {
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  partnerName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  partnerDescription: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  partnerButton: {
-    marginTop: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  partnerButtonText: {
-    color: '#2563EB',
-    fontWeight: '600',
-    fontSize: 14,
   },
   contactSection: {
     backgroundColor: '#FFF',

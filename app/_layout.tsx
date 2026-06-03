@@ -1,40 +1,71 @@
 // app/_layout.tsx
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Stack, useSegments, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ActivityIndicator, View } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
+
+// Hook para monitorar estado do app
+function useAppStateMonitor() {
+  const { session, signOut } = useAuth();
+  const appState = useRef(AppState.currentState);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
+      // Quando voltar do background após muito tempo
+      if (appState.current.match(/background/) && nextAppState === 'active') {
+        console.log('📱 App voltou do background, verificando sessão...');
+        
+        // Se não tem session, faz logout para limpar estado
+        if (!session) {
+          console.log('⚠️ Session perdida, limpando estado...');
+          await signOut();
+        }
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => subscription.remove();
+  }, [session, signOut]);
+}
 
 function RedirectIfNeeded({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const router = useRouter();
-  const { usuario, loading: authLoading } = useAuth();
+  const { session, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading) {
+      console.log('⏳ RedirectIfNeeded - Aguardando auth carregar...');
+      return;
+    }
 
     const inAuthGroup = segments[0] === '(auth)';
-    const isLoggedIn = !!usuario;
+    const inSplash = segments[0] === 'splash';
+    const isLoggedIn = !!session;
 
     console.log('Redirect check:', { 
       inAuthGroup, 
+      inSplash,
       isLoggedIn, 
       segments: segments.join('/'),
-      usuario: usuario?.id 
     });
 
+    // Se estiver na splash, não redireciona (ela mesma cuida disso)
+    if (inSplash) return;
+
     if (!isLoggedIn && !inAuthGroup) {
-      // Não logado e não está em (auth) → vai para login
-      console.log('Redirecionando para login');
-      router.replace('/(auth)/login');
+      // Não logado e não está em (auth) → vai para splash
+      console.log('🔴 Redirecionando para splash');
+      router.replace('/splash');
     } else if (isLoggedIn && inAuthGroup) {
-      // Logado e tentando acessar (auth) → vai para as abas
-      console.log('Redirecionando para tabs');
+      // Logado e tentando acessar (auth) → vai para tabs
+      console.log('🟢 Redirecionando para tabs');
       router.replace('/(tabs)');
     }
-  }, [usuario, authLoading, segments]);
+  }, [session, authLoading, segments]);
 
   return children;
 }
@@ -42,18 +73,14 @@ function RedirectIfNeeded({ children }: { children: React.ReactNode }) {
 function RootLayoutContent() {
   const { loading: authLoading } = useAuth();
   
-  if (authLoading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#2563EB" />
-      </View>
-    );
-  }
+  // Monitora estado do app
+  useAppStateMonitor();
   
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="splash" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen 
         name="corrida/[id]" 

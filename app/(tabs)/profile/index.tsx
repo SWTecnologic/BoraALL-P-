@@ -331,7 +331,7 @@ export default function Profile() {
         </TouchableOpacity>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>BoraALL v2.29.05</Text>
+          <Text style={styles.footerText}>BoraAli v2.06.26</Text>
         </View>
       </ScrollView>
 

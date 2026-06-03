@@ -44,7 +44,6 @@ import {
   Star,
   ThumbsUp,
   MessageCircle,
-  Send,
   ChevronDown,
   AlertTriangle,
   Share2,
@@ -52,6 +51,7 @@ import {
   PhoneCall,
 } from 'lucide-react-native';
 import Constants from 'expo-constants';
+import { ChatModal } from '@/components/ChatModal';
 
 const GOOGLE_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -99,7 +99,6 @@ const PAYMENT_OPTIONS = [
   { id: 'cash', label: 'Dinheiro', Icon: Banknote },
 ];
 
-// Motivos de bloqueio disponíveis
 const BLOCK_REASONS = [
   { id: 'rude', label: 'Mal educado' },
   { id: 'dirty_car', label: 'Carro sujo' },
@@ -112,16 +111,6 @@ const BLOCK_REASONS = [
 
 type RideStep = 'idle' | 'selecting_dest' | 'confirming' | 'searching' | 'accepted' | 'in_progress' | 'completed';
 type ManualSelectTarget = 'origin' | 'dest' | null;
-
-interface ChatMessage {
-  id: string;
-  corrida_id: string;
-  remetente_id: string;
-  tipo_remetente: 'passageiro' | 'motorista';
-  mensagem: string;
-  lida: boolean;
-  created_at: string;
-}
 
 interface RatingModalProps {
   visible: boolean;
@@ -235,7 +224,6 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
               <Text style={driverProfileStyles.loadingText}>Carregando perfil...</Text>
             </View>
           ) : showBlockReasons ? (
-            // ── TELA DE MOTIVO DE BLOQUEIO ──
             <>
               <Text style={driverProfileStyles.blockReasonTitle}>Motivo do bloqueio</Text>
               <Text style={driverProfileStyles.blockReasonSubtitle}>
@@ -281,7 +269,6 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
               </TouchableOpacity>
             </>
           ) : (
-            // ── TELA DE PERFIL ──
             <>
               <View style={driverProfileStyles.header}>
                 <View style={driverProfileStyles.avatarLarge}>
@@ -587,179 +574,6 @@ function RatingModal({ visible, rideId, driverName, price, distance, onClose, us
           </View>
         </Animated.View>
       </View>
-    </Modal>
-  );
-}
-
-// ─── COMPONENTE DE CHAT ────────────────────────────────────────────────────
-interface ChatModalProps {
-  visible: boolean;
-  corridaId: string;
-  usuarioId: string;
-  driverName: string;
-  onClose: () => void;
-}
-
-function ChatModal({ visible, corridaId, usuarioId, driverName, onClose }: ChatModalProps) {
-  const [mensagens, setMensagens] = useState<ChatMessage[]>([]);
-  const [novaMensagem, setNovaMensagem] = useState('');
-  const [loading, setLoading] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
-  const subscriptionRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (visible && corridaId) {
-      carregarMensagens();
-      const subscription = supabase
-        .channel(`chat_${corridaId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'mensagens_chat',
-            filter: `corrida_id=eq.${corridaId}`,
-          },
-          (payload) => {
-            setMensagens((prev) => [...prev, payload.new as ChatMessage]);
-            setTimeout(() => {
-              flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
-          }
-        )
-        .subscribe();
-
-      subscriptionRef.current = subscription;
-
-      return () => {
-        supabase.removeChannel(subscription);
-      };
-    }
-  }, [visible, corridaId]);
-
-  const carregarMensagens = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('mensagens_chat')
-        .select('*')
-        .eq('corrida_id', corridaId)
-        .order('created_at', { ascending: true });
-
-      if (!error && data) {
-        setMensagens(data);
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-        }, 200);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar mensagens:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const enviarMensagem = async () => {
-    if (!novaMensagem.trim() || !corridaId || !usuarioId) return;
-
-    const mensagem = novaMensagem.trim();
-    setNovaMensagem('');
-
-    try {
-      await supabase.from('mensagens_chat').insert({
-        corrida_id: corridaId,
-        remetente_id: usuarioId,
-        tipo_remetente: 'passageiro',
-        mensagem: mensagem,
-      });
-    } catch (err) {
-      console.error('Erro ao enviar mensagem:', err);
-      setNovaMensagem(mensagem);
-      Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
-    }
-  };
-
-  const formatHora = (dataStr: string) => {
-    const data = new Date(dataStr);
-    return data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={chatStyles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={chatStyles.overlay}>
-          <View style={chatStyles.chatContainer}>
-            <View style={chatStyles.header}>
-              <View style={chatStyles.headerInfo}>
-                <View style={chatStyles.avatar}>
-                  <User size={20} color="#FFF" />
-                </View>
-                <View>
-                  <Text style={chatStyles.headerTitle}>{driverName}</Text>
-                  <Text style={chatStyles.headerSubtitle}>Motorista</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={onClose} style={chatStyles.closeBtn}>
-                <ChevronDown size={24} color="#374151" />
-              </TouchableOpacity>
-            </View>
-
-            {loading ? (
-              <View style={chatStyles.loadingContainer}>
-                <ActivityIndicator size="small" color="#1E40AF" />
-                <Text style={chatStyles.loadingText}>Carregando mensagens...</Text>
-              </View>
-            ) : (
-              <FlatList
-                ref={flatListRef}
-                data={mensagens}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={chatStyles.messagesList}
-                renderItem={({ item }) => {
-                  const isMyMessage = item.tipo_remetente === 'passageiro' && item.remetente_id === usuarioId;
-                  return (
-                    <View style={[chatStyles.messageBubble, isMyMessage ? chatStyles.myMessage : chatStyles.otherMessage]}>
-                      <Text style={[chatStyles.messageText, isMyMessage ? chatStyles.myMessageText : chatStyles.otherMessageText]}>
-                        {item.mensagem}
-                      </Text>
-                      <Text style={[chatStyles.messageTime, isMyMessage ? chatStyles.myMessageTime : chatStyles.otherMessageTime]}>
-                        {formatHora(item.created_at)}
-                      </Text>
-                    </View>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={chatStyles.emptyContainer}>
-                    <MessageCircle size={48} color="#D1D5DB" />
-                    <Text style={chatStyles.emptyText}>Nenhuma mensagem ainda</Text>
-                    <Text style={chatStyles.emptySubtext}>Envie uma mensagem para o motorista</Text>
-                  </View>
-                }
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-              />
-            )}
-
-            <View style={chatStyles.inputContainer}>
-              <TextInput
-                style={chatStyles.input}
-                placeholder="Digite sua mensagem..."
-                placeholderTextColor="#9CA3AF"
-                value={novaMensagem}
-                onChangeText={setNovaMensagem}
-                multiline
-                maxLength={500}
-              />
-              <TouchableOpacity
-                style={[chatStyles.sendBtn, !novaMensagem.trim() && { opacity: 0.5 }]}
-                onPress={enviarMensagem}
-                disabled={!novaMensagem.trim()}
-              >
-                <Send size={20} color="#FFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -1516,6 +1330,7 @@ export default function PassengerHome() {
         destino_endereco: destAddress, destino_latitude: destCoord.latitude, destino_longitude: destCoord.longitude,
         distancia_km: distanciaNum, duracao_estimada: duracaoNum, valor_estimado: price,
         status: 'solicitada', data_solicitacao: new Date().toISOString(),
+        metodo_pagamento: selectedPayment,
       }).select('id').single();
       if (error || !corrida) { Alert.alert('Erro', 'Falha ao solicitar.'); setStep('confirming'); return; }
       setCurrentRideId(corrida.id);
@@ -1558,7 +1373,6 @@ export default function PassengerHome() {
     );
   }
 
-  // ─── DRIVER CARD (usado em accepted e in_progress) ─────────────────────
   const renderDriverCard = (showDistanceInfo: boolean) => (
     <TouchableOpacity style={styles.driverCard} onPress={handleViewDriverProfile} activeOpacity={0.7}>
       <View style={styles.driverHeader}>
@@ -1583,7 +1397,6 @@ export default function PassengerHome() {
         </View>
       </View>
 
-      {/* Informações do veículo exibidas diretamente no card */}
       {(driverCarModel || driverCarColor) && (
         <View style={styles.driverVehicleRow}>
           <Car size={13} color="#6B7280" />
@@ -1670,24 +1483,24 @@ export default function PassengerHome() {
         )}
         {isAccepted && driverRouteCoords.length > 1 && (
           <>
-            <Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineJoin="round" lineCap="round" lineDashPattern={[8, 4]} />
-            <Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} lineJoin="round" lineCap="round" />
+            <Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} />
+            <Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} />
           </>
         )}
         {isInProgress && routeCoords.length > 1 && (
           <>
-            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} lineJoin="round" lineCap="round" />
-            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} lineJoin="round" lineCap="round" />
+            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} />
+            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} />
           </>
         )}
         {!hideTopBar && routeCoords.length > 1 && (
           <>
-            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} lineJoin="round" lineCap="round" />
-            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} lineJoin="round" lineCap="round" />
+            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} />
+            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} />
           </>
         )}
         {(isAccepted || isInProgress) && driverCoord && (
-          <Marker ref={driverMarkerRef} coordinate={driverCoord} anchor={{ x: 0.5, y: 0.5 }} zIndex={999} title={driverName} description={isAccepted ? 'Indo até você' : 'Em viagem'}>
+          <Marker ref={driverMarkerRef} coordinate={driverCoord} anchor={{ x: 0.5, y: 0.5 }} zIndex={999} title={driverName}>
             <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
               <View style={styles.markerDriverPulse}><View style={styles.markerDriver}><View style={styles.markerDriverInner}><Car size={16} color="#FFF" /></View></View></View>
             </Animated.View>
@@ -1831,233 +1644,44 @@ const mapNightStyle = [
 ];
 
 const driverProfileStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    paddingTop: 12,
-    maxHeight: SCREEN_HEIGHT * 0.80,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E5E7EB',
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  loadingContainer: {
-    paddingVertical: 40,
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-    gap: 12,
-  },
-  avatarLarge: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#1E40AF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 40,
-  },
-  driverName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  ratingText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#92400E',
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 12,
-  },
-  infoGrid: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  infoValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1E40AF',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  statDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: '#E5E7EB',
-  },
-  blockBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#FEF2F2',
-    paddingVertical: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-    marginBottom: 12,
-  },
-  blockBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#DC2626',
-  },
-  closeBtn: {
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-  },
-  closeBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  // ── Estilos de motivo de bloqueio ──
-  blockReasonTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#111827',
-    textAlign: 'center',
-    marginBottom: 6,
-  },
-  blockReasonSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  reasonsList: {
-    gap: 8,
-    marginBottom: 20,
-  },
-  reasonItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-  },
-  reasonItemSelected: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#DC2626',
-  },
-  reasonRadio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reasonRadioSelected: {
-    borderColor: '#DC2626',
-  },
-  reasonRadioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#DC2626',
-  },
-  reasonLabel: {
-    fontSize: 15,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  reasonLabelSelected: {
-    color: '#DC2626',
-    fontWeight: '700',
-  },
-  blockConfirmBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#DC2626',
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginBottom: 12,
-  },
-  blockConfirmBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFF',
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  card: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24, paddingTop: 12, maxHeight: SCREEN_HEIGHT * 0.80 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 20 },
+  loadingContainer: { paddingVertical: 40, alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14, color: '#6B7280' },
+  header: { alignItems: 'center', marginBottom: 24, gap: 12 },
+  avatarLarge: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1E40AF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 40 },
+  driverName: { fontSize: 20, fontWeight: '700', color: '#111827' },
+  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEF3C7', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  ratingText: { fontSize: 14, fontWeight: '600', color: '#92400E' },
+  section: { marginBottom: 20 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 12 },
+  infoGrid: { backgroundColor: '#F9FAFB', borderRadius: 16, padding: 16, gap: 12 },
+  infoItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  infoLabel: { fontSize: 14, color: '#6B7280' },
+  infoValue: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  statsContainer: { flexDirection: 'row', backgroundColor: '#F9FAFB', borderRadius: 16, padding: 20, alignItems: 'center' },
+  statItem: { flex: 1, alignItems: 'center', gap: 4 },
+  statNumber: { fontSize: 20, fontWeight: '700', color: '#1E40AF' },
+  statLabel: { fontSize: 12, color: '#6B7280' },
+  statDivider: { width: 1, height: 40, backgroundColor: '#E5E7EB' },
+  blockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FEF2F2', paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: '#FEE2E2', marginBottom: 12 },
+  blockBtnText: { fontSize: 15, fontWeight: '700', color: '#DC2626' },
+  closeBtn: { paddingVertical: 14, borderRadius: 14, backgroundColor: '#F3F4F6', alignItems: 'center' },
+  closeBtnText: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  blockReasonTitle: { fontSize: 20, fontWeight: '800', color: '#111827', textAlign: 'center', marginBottom: 6 },
+  blockReasonSubtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 20 },
+  reasonsList: { gap: 8, marginBottom: 20 },
+  reasonItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F9FAFB', borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB' },
+  reasonItemSelected: { backgroundColor: '#FEF2F2', borderColor: '#DC2626' },
+  reasonRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center' },
+  reasonRadioSelected: { borderColor: '#DC2626' },
+  reasonRadioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#DC2626' },
+  reasonLabel: { fontSize: 15, color: '#374151', fontWeight: '500' },
+  reasonLabelSelected: { color: '#DC2626', fontWeight: '700' },
+  blockConfirmBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#DC2626', paddingVertical: 14, borderRadius: 14, marginBottom: 12 },
+  blockConfirmBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });
 
 const alertStyles = StyleSheet.create({
@@ -2098,36 +1722,6 @@ const ratingStyles = StyleSheet.create({
   skipText: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
   submitBtn: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: '#1E3A5F' },
   submitText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
-});
-
-const chatStyles = StyleSheet.create({
-  container: { flex: 1 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  chatContainer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, height: SCREEN_HEIGHT * 0.7, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 10 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  headerInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1E40AF', alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  headerSubtitle: { fontSize: 12, color: '#6B7280', marginTop: 1 },
-  closeBtn: { padding: 4 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText: { fontSize: 14, color: '#6B7280' },
-  messagesList: { paddingHorizontal: 16, paddingVertical: 12, flexGrow: 1 },
-  messageBubble: { maxWidth: '80%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, marginBottom: 8 },
-  myMessage: { alignSelf: 'flex-end', backgroundColor: '#1E40AF', borderBottomRightRadius: 4 },
-  otherMessage: { alignSelf: 'flex-start', backgroundColor: '#F3F4F6', borderBottomLeftRadius: 4 },
-  messageText: { fontSize: 15, lineHeight: 20 },
-  myMessageText: { color: '#FFFFFF' },
-  otherMessageText: { color: '#111827' },
-  messageTime: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  myMessageTime: { color: 'rgba(255,255,255,0.7)' },
-  otherMessageTime: { color: '#9CA3AF' },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40, gap: 8 },
-  emptyText: { fontSize: 16, fontWeight: '600', color: '#9CA3AF' },
-  emptySubtext: { fontSize: 14, color: '#D1D5DB' },
-  inputContainer: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB', gap: 8 },
-  input: { flex: 1, borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, color: '#111827', maxHeight: 100, backgroundColor: '#F9FAFB' },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1E40AF', alignItems: 'center', justifyContent: 'center' },
 });
 
 const styles = StyleSheet.create({
@@ -2194,7 +1788,6 @@ const styles = StyleSheet.create({
   cancelSearchBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: '#F3F4F6' },
   cancelSearchText: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
   inProgressOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', zIndex: 25, pointerEvents: 'box-none' },
-  // ── Driver Card ──
   driverCard: { marginHorizontal: 16, marginTop: 12, backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
   driverHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   driverAvatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1E40AF', alignItems: 'center', justifyContent: 'center' },
@@ -2211,7 +1804,6 @@ const styles = StyleSheet.create({
   driverDistanceInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   driverDistanceText: { fontSize: 13, color: '#10B981', fontWeight: '600' },
   viewMoreText: { fontSize: 11, color: '#9CA3AF', textAlign: 'right', marginTop: 6 },
-  // ── In Progress Card ──
   inProgressCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 20 },
   phaseStatus: { backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 12, borderWidth: 1, borderColor: '#BFDBFE' },
   phaseContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },

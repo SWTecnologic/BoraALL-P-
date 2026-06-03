@@ -5,22 +5,24 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Alert,
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, Mail, Lock, FileText, Calendar, Phone, Camera } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 
-// Componente para campo de input com ícone
+// Componente para campo de input com ícone (estilizado com cores laranja/preto)
 const InputField = ({ icon, ...props }: any) => (
   <View style={styles.inputContainer}>
     {icon && <View style={styles.inputIcon}>{icon}</View>}
-    <TextInput style={styles.input} placeholderTextColor="#6B7280" {...props} />
+    <TextInput style={styles.input} placeholderTextColor="#999" {...props} />
   </View>
 );
 
@@ -38,9 +40,8 @@ export default function Register() {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Função para tirar foto com a câmera (frontal)
+  // Função para tirar foto com a câmera frontal
   const takePhoto = async () => {
-    // Solicita permissão da câmera
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissionResult.granted) {
       Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para tirar sua foto de perfil.');
@@ -52,7 +53,7 @@ export default function Register() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
-      cameraType: 'front', // Força a câmera frontal (funciona na maioria dos dispositivos)
+      cameraType: 'front',
     });
 
     if (!result.canceled) {
@@ -97,7 +98,6 @@ export default function Register() {
     setLoading(true);
     setUploading(true);
     try {
-      // 1. Cria usuário no Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.senha,
@@ -107,13 +107,11 @@ export default function Register() {
       const userId = authData.user?.id;
       if (!userId) throw new Error('Erro ao criar usuário');
 
-      // 2. Upload da foto (se houver)
       let fotoUrl = null;
       if (fotoPerfilUri) {
         fotoUrl = await uploadProfileImage(userId);
       }
 
-      // 3. Insere na tabela usuarios
       const { error: usuarioError } = await supabase
         .from('usuarios')
         .insert({
@@ -129,7 +127,6 @@ export default function Register() {
         });
       if (usuarioError) throw usuarioError;
 
-      // 4. Insere na tabela passageiros
       const { error: passageiroError } = await supabase
         .from('passageiros')
         .insert({ usuario_id: userId });
@@ -168,145 +165,249 @@ export default function Register() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Criar Conta</Text>
-            <Text style={styles.subtitle}>Junte-se ao QuebraCar como passageiro</Text>
-          </View>
-
-          {/* Foto de perfil - agora com câmera frontal */}
-          <TouchableOpacity style={styles.photoContainer} onPress={takePhoto}>
-            {fotoPerfilUri ? (
-              <Image source={{ uri: fotoPerfilUri }} style={styles.profileImage} />
-            ) : (
-              <View style={styles.photoPlaceholder}>
-                <Camera size={32} color="#6B7280" />
-                <Text style={styles.photoText}>Tirar foto</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.form}>
-            <InputField
-              icon={<User size={20} color="#6B7280" />}
-              placeholder="Nome completo"
-              value={formData.nome_completo}
-              onChangeText={v => updateFormData('nome_completo', v)}
-            />
-            <InputField
-              icon={<Mail size={20} color="#6B7280" />}
-              placeholder="E-mail"
-              value={formData.email}
-              onChangeText={v => updateFormData('email', v)}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <InputField
-              icon={<Phone size={20} color="#6B7280" />}
-              placeholder="Telefone"
-              value={formData.telefone}
-              onChangeText={v => updateFormData('telefone', v)}
-              keyboardType="phone-pad"
-            />
-            <InputField
-              icon={<FileText size={20} color="#6B7280" />}
-              placeholder="CPF"
-              value={formData.cpf}
-              onChangeText={v => updateFormData('cpf', v)}
-              keyboardType="numeric"
-            />
-            <InputField
-              icon={<Calendar size={20} color="#6B7280" />}
-              placeholder="Data de nascimento (DD/MM/AAAA)"
-              value={formData.data_nascimento}
-              onChangeText={v => updateFormData('data_nascimento', v)}
-            />
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Segurança</Text>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
+        <ScrollView 
+          style={styles.scrollView} 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.content}>
+            <View style={styles.header}>
+              <Text style={styles.title}>BoraAli</Text>
+              <Text style={styles.subtitle}>Crie sua conta e comece a viajar</Text>
             </View>
-            <InputField
-              icon={<Lock size={20} color="#6B7280" />}
-              placeholder="Senha"
-              value={formData.senha}
-              onChangeText={v => updateFormData('senha', v)}
-              secureTextEntry
-            />
-            <InputField
-              icon={<Lock size={20} color="#6B7280" />}
-              placeholder="Confirmar senha"
-              value={formData.confirmarSenha}
-              onChangeText={v => updateFormData('confirmarSenha', v)}
-              secureTextEntry
-            />
 
-            <TouchableOpacity
-              style={[styles.button, (loading || uploading) && styles.buttonDisabled]}
-              onPress={handleRegister}
-              disabled={loading || uploading}
-            >
-              {loading || uploading ? (
-                <ActivityIndicator color="#FFFFFF" />
+            {/* Foto de perfil - câmera frontal */}
+            <TouchableOpacity style={styles.photoContainer} onPress={takePhoto}>
+              {fotoPerfilUri ? (
+                <Image source={{ uri: fotoPerfilUri }} style={styles.profileImage} />
               ) : (
-                <Text style={styles.buttonText}>Criar conta</Text>
+                <View style={styles.photoPlaceholder}>
+                  <Camera size={32} color="#FF6600" />
+                  <Text style={styles.photoText}>Tirar foto</Text>
+                </View>
               )}
             </TouchableOpacity>
-          </View>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Já tem conta? </Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-              <Text style={styles.linkText}>Entre aqui</Text>
-            </TouchableOpacity>
+            <View style={styles.form}>
+              <InputField
+                icon={<User size={20} color="#FF6600" />}
+                placeholder="Nome completo"
+                placeholderTextColor="#999"
+                value={formData.nome_completo}
+                onChangeText={v => updateFormData('nome_completo', v)}
+              />
+              <InputField
+                icon={<Mail size={20} color="#FF6600" />}
+                placeholder="E-mail"
+                placeholderTextColor="#999"
+                value={formData.email}
+                onChangeText={v => updateFormData('email', v)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <InputField
+                icon={<Phone size={20} color="#FF6600" />}
+                placeholder="Telefone"
+                placeholderTextColor="#999"
+                value={formData.telefone}
+                onChangeText={v => updateFormData('telefone', v)}
+                keyboardType="phone-pad"
+              />
+              <InputField
+                icon={<FileText size={20} color="#FF6600" />}
+                placeholder="CPF"
+                placeholderTextColor="#999"
+                value={formData.cpf}
+                onChangeText={v => updateFormData('cpf', v)}
+                keyboardType="numeric"
+              />
+              <InputField
+                icon={<Calendar size={20} color="#FF6600" />}
+                placeholder="Data de nascimento (DD/MM/AAAA)"
+                placeholderTextColor="#999"
+                value={formData.data_nascimento}
+                onChangeText={v => updateFormData('data_nascimento', v)}
+              />
+
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Segurança</Text>
+              </View>
+              <InputField
+                icon={<Lock size={20} color="#FF6600" />}
+                placeholder="Senha"
+                placeholderTextColor="#999"
+                value={formData.senha}
+                onChangeText={v => updateFormData('senha', v)}
+                secureTextEntry
+              />
+              <InputField
+                icon={<Lock size={20} color="#FF6600" />}
+                placeholder="Confirmar senha"
+                placeholderTextColor="#999"
+                value={formData.confirmarSenha}
+                onChangeText={v => updateFormData('confirmarSenha', v)}
+                secureTextEntry
+              />
+
+              <TouchableOpacity
+                style={[styles.button, (loading || uploading) && styles.buttonDisabled]}
+                onPress={handleRegister}
+                disabled={loading || uploading}
+              >
+                {loading || uploading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.buttonText}>Criar conta</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Já tem conta? </Text>
+              <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+                <Text style={styles.linkText}>Entre aqui</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  scrollView: { flex: 1 },
-  content: { paddingHorizontal: 24, paddingVertical: 32 },
-  header: { alignItems: 'center', marginBottom: 32 },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#2563EB', marginBottom: 8 },
-  subtitle: { fontSize: 16, color: '#6B7280', textAlign: 'center' },
-  photoContainer: { alignItems: 'center', marginBottom: 24 },
-  profileImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: '#2563EB' },
+  container: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FF6600',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#CCC',
+    textAlign: 'center',
+  },
+  photoContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#FF6600',
+  },
   photoPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#E5E7EB',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#1A1A1A',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderWidth: 2,
+    borderColor: '#FF6600',
+    borderStyle: 'dashed',
   },
-  photoText: { fontSize: 12, color: '#6B7280', marginTop: 8, textAlign: 'center' },
-  form: { marginBottom: 32 },
-  sectionHeader: { marginTop: 24, marginBottom: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#374151' },
+  photoText: {
+    fontSize: 12,
+    color: '#FF6600',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  form: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FF6600',
+  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
     marginBottom: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#333',
   },
-  inputIcon: { marginRight: 12 },
-  input: { flex: 1, fontSize: 16, color: '#111827' },
-  button: { backgroundColor: '#2563EB', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
-  buttonDisabled: { backgroundColor: '#9CA3AF' },
-  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 16 },
-  footerText: { fontSize: 14, color: '#6B7280' },
-  linkText: { fontSize: 14, color: '#2563EB', fontWeight: '600' },
+  inputIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    color: '#FFF',
+  },
+  button: {
+    backgroundColor: '#FF6600',
+    paddingVertical: 16,
+    borderRadius: 30,
+    alignItems: 'center',
+    marginTop: 16,
+    shadowColor: '#FF6600',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  buttonDisabled: {
+    backgroundColor: '#B87333',
+    opacity: 0.7,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  footerText: {
+    fontSize: 14,
+    color: '#AAA',
+  },
+  linkText: {
+    fontSize: 14,
+    color: '#FF6600',
+    fontWeight: 'bold',
+  },
 });

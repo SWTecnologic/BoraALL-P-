@@ -6,20 +6,26 @@
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start",
     "build:web": "expo export --platform web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@lucide/lab": "^0.1.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
     "@supabase/supabase-js": "^2.57.4",
     "base64-arraybuffer": "^1.0.2",
     "dotenv": "^17.4.2",
     "expo": "^54.0.0",
+    "expo-av": "~16.0.8",
     "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
+    "expo-device": "~8.0.10",
+    "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",

@@ -1,3 +1,4 @@
+// contexts/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
@@ -16,6 +17,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, userData: any) => Promise<void>;
   signOut: () => Promise<void>;
+  resetAuthState: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -33,36 +35,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [usuario, setUsuario] = useState<UsuarioCompleto | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUsuario(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          await fetchUsuario(session.user.id);
-        } else {
-          setUsuario(null);
-          setLoading(false);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   const fetchUsuario = async (userId: string) => {
     try {
@@ -107,6 +79,91 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const resetAuthState = async () => {
+    console.log('🔄 Resetando estado de autenticação...');
+    setLoading(true);
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
+      
+      if (currentSession?.user) {
+        await fetchUsuario(currentSession.user.id);
+      } else {
+        setUsuario(null);
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Erro ao resetar auth:', error);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+
+    const initializeAuth = async () => {
+      try {
+        // Timeout de segurança - nunca fica travado
+        timeoutId = setTimeout(() => {
+          if (isMounted && loading) {
+            console.log('⚠️ Auth timeout - forçando loading false');
+            setLoading(false);
+          }
+        }, 5000);
+
+        console.log('🚀 Inicializando AuthContext...');
+        
+        // Get initial session
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
+        
+        console.log('📱 Sessão inicial:', !!initialSession);
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+        
+        if (initialSession?.user) {
+          await fetchUsuario(initialSession.user.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        if (isMounted) setLoading(false);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    initializeAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!isMounted) return;
+        
+        console.log('🔄 Auth state changed:', event, !!session);
+        setSession(session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          await fetchUsuario(session.user.id);
+        } else {
+          setUsuario(null);
+          setLoading(false);
+        }
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, []);
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -129,6 +186,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    setSession(null);
+    setUser(null);
+    setUsuario(null);
   };
 
   const value = {
@@ -139,6 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signUp,
     signOut,
+    resetAuthState,
   };
 
   return (
