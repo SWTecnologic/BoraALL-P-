@@ -44,18 +44,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
         .single();
 
-      if (userError) throw userError;
+      // Trata PGRST116 (0 rows) como "usuário ainda não cadastrado"
+      if (userError) {
+        if (userError.code === 'PGRST116') {
+          console.warn('⏳ Usuário autenticado, mas perfil ainda não criado. Aguardando...');
+          setUsuario(null);
+          setLoading(false);
+          return;
+        }
+        throw userError;
+      }
 
       let usuarioCompleto: UsuarioCompleto = userData;
 
-      // Fetch additional data based on user type
+      // Busca dados adicionais conforme tipo de usuário
       if (userData.tipo_usuario === 'passageiro') {
         const { data: passageiroData } = await supabase
           .from('passageiros')
           .select('*')
           .eq('usuario_id', userId)
           .single();
-        
+
         if (passageiroData) {
           usuarioCompleto.passageiro = passageiroData;
         }
@@ -65,15 +74,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('usuario_id', userId)
           .single();
-        
+
         if (motoristaData) {
           usuarioCompleto.motorista = motoristaData;
         }
       }
 
       setUsuario(usuarioCompleto);
+      console.log('✅ Perfil carregado com sucesso:', usuarioCompleto.nome_completo);
     } catch (error) {
-      console.error('Error fetching user data:', error);
+      console.error('❌ Erro ao buscar dados do usuário:', error);
+      setUsuario(null);
     } finally {
       setLoading(false);
     }
@@ -86,15 +97,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
-      
+
       if (currentSession?.user) {
         await fetchUsuario(currentSession.user.id);
       } else {
         setUsuario(null);
         setLoading(false);
       }
+      console.log('✅ Reset concluído.');
     } catch (error) {
-      console.error('Erro ao resetar auth:', error);
+      console.error('❌ Erro ao resetar auth:', error);
       setLoading(false);
     }
   };
@@ -105,32 +117,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initializeAuth = async () => {
       try {
-        // Timeout de segurança - nunca fica travado
         timeoutId = setTimeout(() => {
           if (isMounted && loading) {
-            console.log('⚠️ Auth timeout - forçando loading false');
+            console.warn('⚠️ Auth timeout – forçando loading false');
             setLoading(false);
           }
         }, 5000);
 
         console.log('🚀 Inicializando AuthContext...');
-        
-        // Get initial session
+
         const { data: { session: initialSession } } = await supabase.auth.getSession();
-        
         if (!isMounted) return;
-        
+
         console.log('📱 Sessão inicial:', !!initialSession);
         setSession(initialSession);
         setUser(initialSession?.user ?? null);
-        
+
         if (initialSession?.user) {
           await fetchUsuario(initialSession.user.id);
         } else {
           setLoading(false);
         }
       } catch (error) {
-        console.error('Error initializing auth:', error);
+        console.error('❌ Erro ao inicializar auth:', error);
         if (isMounted) setLoading(false);
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
@@ -139,15 +148,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initializeAuth();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!isMounted) return;
-        
-        console.log('🔄 Auth state changed:', event, !!session);
+
+        console.log('🔄 Mudança de autenticação:', event, !!session);
         setSession(session);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
           await fetchUsuario(session.user.id);
         } else {
@@ -165,10 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
@@ -202,9 +207,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetAuthState,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

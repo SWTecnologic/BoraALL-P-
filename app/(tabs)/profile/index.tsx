@@ -1,12 +1,26 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Image, Linking, Platform, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { router, useFocusEffect } from 'expo-router';
-import { User, CreditCard, Shield, Bell, LogOut, Star, Clock, ChevronRight, Camera, X, Images } from 'lucide-react-native';
+import { User, CreditCard, Shield, Bell, LogOut, Star, Clock, ChevronRight, Camera, X, Images, Calendar } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
+
+// Cores do tema
+const COLORS = {
+  background: '#0A0A0A',
+  surface: '#1A1A1A',
+  surfaceLight: '#2A2A2A',
+  gold: '#FFD700',
+  goldDark: '#D4A800',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#B0B0B0',
+  textMuted: '#6B6B6B',
+  border: '#333333',
+  danger: '#FF4444',
+  starEmpty: '#444444',
+};
 
 export default function Profile() {
   const { usuario, signOut } = useAuth();
@@ -16,6 +30,10 @@ export default function Profile() {
   const [uploading, setUploading] = useState(false);
   const [showImageOptions, setShowImageOptions] = useState(false);
   const [loading, setLoading] = useState(true);
+  
+  // Novos estados para tempo de plataforma
+  const [dataCadastro, setDataCadastro] = useState<string | null>(null);
+  const [tempoPlataforma, setTempoPlataforma] = useState<string>('');
 
   // Recarregar dados sempre que a tela ganhar foco
   useFocusEffect(
@@ -48,7 +66,7 @@ export default function Profile() {
   const carregarDadosCompletos = async () => {
     setLoading(true);
     try {
-      // Buscar dados do passageiro (total_corridas e avaliacao_media)
+      // 1. Buscar dados do passageiro (total_corridas e avaliacao_media)
       const { data: passageiroData, error: passageiroError } = await supabase
         .from('passageiros')
         .select('total_corridas, avaliacao_media')
@@ -57,7 +75,7 @@ export default function Profile() {
 
       if (passageiroError) throw passageiroError;
 
-      // Buscar TODAS as corridas FINALIZADAS do passageiro (mais confiável)
+      // 2. Buscar total de corridas finalizadas (mais confiável)
       const { data: passageiroIdData, error: passIdError } = await supabase
         .from('passageiros')
         .select('id')
@@ -84,10 +102,10 @@ export default function Profile() {
         setAvaliacaoMedia(passageiroData.avaliacao_media || 5.0);
       }
 
-      // Buscar foto do perfil
+      // 3. Buscar foto e data de criação do usuário
       const { data: userData, error: userError } = await supabase
         .from('usuarios')
-        .select('foto_perfil_url')
+        .select('foto_perfil_url, created_at')
         .eq('id', usuario?.id)
         .single();
 
@@ -96,8 +114,36 @@ export default function Profile() {
       if (userData?.foto_perfil_url) {
         setFotoPerfil(userData.foto_perfil_url);
       }
+
+      // Calcular tempo de plataforma
+      if (userData?.created_at) {
+        const created = new Date(userData.created_at);
+        const now = new Date();
+        const diffMs = now.getTime() - created.getTime();
+        const diffMeses = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
+        const diffAnos = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 365));
+
+        let tempoStr = '';
+        if (diffAnos > 0) {
+          tempoStr = `${diffAnos} ano${diffAnos > 1 ? 's' : ''}`;
+          const mesesRestantes = diffMeses % 12;
+          if (mesesRestantes > 0) {
+            tempoStr += ` e ${mesesRestantes} mês${mesesRestantes > 1 ? 'es' : ''}`;
+          }
+        } else if (diffMeses > 0) {
+          tempoStr = `${diffMeses} mês${diffMeses > 1 ? 'es' : ''}`;
+        } else {
+          const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          tempoStr = `${diffDias} dia${diffDias > 1 ? 's' : ''}`;
+        }
+
+        setTempoPlataforma(tempoStr);
+        setDataCadastro(created.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+      }
+
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
+      Alert.alert('Erro', 'Não foi possível carregar os dados do perfil.');
     } finally {
       setLoading(false);
     }
@@ -212,6 +258,32 @@ export default function Profile() {
     }
   };
 
+  // Componente para exibir as estrelas com preenchimento
+  const RatingStars = ({ rating, size = 24 }: { rating: number; size?: number }) => {
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+
+    return (
+      <View style={styles.ratingStarsContainer}>
+        {[...Array(fullStars)].map((_, i) => (
+          <Star key={`full-${i}`} size={size} color={COLORS.gold} fill={COLORS.gold} />
+        ))}
+        {hasHalfStar && (
+          <View style={{ position: 'relative' }}>
+            <Star size={size} color={COLORS.gold} fill={COLORS.gold} />
+            <View style={{ position: 'absolute', width: '50%', height: '100%', backgroundColor: COLORS.background, overflow: 'hidden' }}>
+              <Star size={size} color={COLORS.gold} fill="transparent" />
+            </View>
+          </View>
+        )}
+        {[...Array(emptyStars)].map((_, i) => (
+          <Star key={`empty-${i}`} size={size} color={COLORS.starEmpty} fill="transparent" />
+        ))}
+      </View>
+    );
+  };
+
   const menuItems = [
     {
       id: 'payment',
@@ -237,17 +309,17 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color={COLORS.gold} />
           <Text style={styles.loadingText}>Carregando perfil...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.profileSection}>
           <TouchableOpacity 
@@ -257,7 +329,7 @@ export default function Profile() {
           >
             {uploading ? (
               <View style={styles.avatarPlaceholder}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
+                <ActivityIndicator size="large" color={COLORS.gold} />
               </View>
             ) : (
               <>
@@ -265,14 +337,14 @@ export default function Profile() {
                   <>
                     <Image source={{ uri: fotoPerfil }} style={styles.avatar} />
                     <View style={styles.cameraOverlay}>
-                      <Camera size={24} color="#FFFFFF" />
+                      <Camera size={24} color={COLORS.background} />
                     </View>
                   </>
                 ) : (
                   <View style={styles.avatarPlaceholder}>
-                    <User size={40} color="#FFFFFF" />
+                    <User size={40} color={COLORS.gold} />
                     <View style={styles.cameraOverlay}>
-                      <Camera size={24} color="#FFFFFF" />
+                      <Camera size={24} color={COLORS.background} />
                     </View>
                   </View>
                 )}
@@ -284,6 +356,16 @@ export default function Profile() {
             <Text style={styles.userName}>{usuario?.nome_completo}</Text>
             <Text style={styles.userEmail}>{usuario?.email}</Text>
             <Text style={styles.userPhone}>{usuario?.telefone}</Text>
+            
+            {/* Tempo de plataforma */}
+            {dataCadastro && (
+              <View style={styles.memberSinceContainer}>
+                <Calendar size={16} color={COLORS.gold} />
+                <Text style={styles.memberSinceText}>
+                  Membro desde {dataCadastro} {tempoPlataforma ? `(há ${tempoPlataforma})` : ''}
+                </Text>
+              </View>
+            )}
           </View>
 
           <TouchableOpacity style={styles.editButton}>
@@ -297,16 +379,23 @@ export default function Profile() {
             onPress={() => router.push('/history')}
             activeOpacity={0.7}
           >
-            <Clock size={24} color="#2563EB" />
+            <Clock size={24} color={COLORS.gold} />
             <Text style={styles.statNumber}>{totalCorridas}</Text>
             <Text style={styles.statLabel}>Corridas</Text>
           </TouchableOpacity>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Star size={24} color="#F59E0B" />
+            <Star size={24} color={COLORS.gold} fill={COLORS.gold} />
             <Text style={styles.statNumber}>{avaliacaoMedia.toFixed(1)}</Text>
             <Text style={styles.statLabel}>Avaliação</Text>
           </View>
+        </View>
+
+        {/* Load de avaliação com estrelas */}
+        <View style={styles.ratingLoadSection}>
+          <Text style={styles.ratingLoadTitle}>Sua avaliação média</Text>
+          <RatingStars rating={avaliacaoMedia} size={28} />
+          <Text style={styles.ratingLoadValue}>{avaliacaoMedia.toFixed(1)} / 5.0</Text>
         </View>
 
         <View style={styles.menuSection}>
@@ -317,16 +406,16 @@ export default function Profile() {
               onPress={item.onPress}
             >
               <View style={styles.menuItemLeft}>
-                <item.icon size={20} color="#374151" />
+                <item.icon size={20} color={COLORS.gold} />
                 <Text style={styles.menuItemText}>{item.title}</Text>
               </View>
-              <ChevronRight size={20} color="#9CA3AF" />
+              <ChevronRight size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
           ))}
         </View>
 
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-          <LogOut size={20} color="#DC2626" />
+          <LogOut size={20} color={COLORS.danger} />
           <Text style={styles.signOutText}>Sair da Conta</Text>
         </TouchableOpacity>
 
@@ -345,28 +434,28 @@ export default function Profile() {
             <View style={styles.optionsHeader}>
               <Text style={styles.optionsTitle}>Alterar Foto de Perfil</Text>
               <TouchableOpacity onPress={() => setShowImageOptions(false)}>
-                <X size={24} color="#6B7280" />
+                <X size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.optionButton} onPress={tirarFoto}>
-              <Camera size={24} color="#2563EB" />
+              <Camera size={24} color={COLORS.gold} />
               <Text style={styles.optionText}>Tirar Foto</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.optionButton} onPress={escolherDaGaleria}>
-              <Images size={24} color="#2563EB" />
+              <Images size={24} color={COLORS.gold} />
               <Text style={styles.optionText}>Escolher da Galeria</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
@@ -376,12 +465,14 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
   },
   profileSection: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     padding: 24,
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
   avatarContainer: {
     marginBottom: 16,
@@ -396,22 +487,24 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#2563EB',
+    backgroundColor: COLORS.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.gold,
   },
   cameraOverlay: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: '#2563EB',
+    backgroundColor: COLORS.gold,
     borderRadius: 20,
     width: 36,
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: COLORS.background,
   },
   userInfo: {
     alignItems: 'center',
@@ -420,34 +513,50 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: COLORS.textPrimary,
     marginBottom: 4,
   },
   userEmail: {
     fontSize: 16,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
     marginBottom: 2,
   },
   userPhone: {
     fontSize: 14,
-    color: '#9CA3AF',
+    color: COLORS.textMuted,
+  },
+  memberSinceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
+    backgroundColor: COLORS.surfaceLight,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+  },
+  memberSinceText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   editButton: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: COLORS.gold,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
   },
   editButtonText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+    fontWeight: '600',
+    color: COLORS.background,
   },
   statsSection: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     marginTop: 8,
     paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
   statItem: {
     flex: 1,
@@ -455,22 +564,46 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: COLORS.border,
     marginVertical: 8,
   },
   statNumber: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: COLORS.textPrimary,
     marginTop: 4,
     marginBottom: 2,
   },
   statLabel: {
     fontSize: 12,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
+  },
+  ratingLoadSection: {
+    backgroundColor: COLORS.surface,
+    marginTop: 8,
+    padding: 20,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  ratingLoadTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  ratingLoadValue: {
+    fontSize: 14,
+    color: COLORS.gold,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  ratingStarsContainer: {
+    flexDirection: 'row',
+    gap: 4,
   },
   menuSection: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     marginTop: 8,
   },
   menuItem: {
@@ -480,7 +613,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: COLORS.border,
   },
   menuItemLeft: {
     flexDirection: 'row',
@@ -488,14 +621,14 @@ const styles = StyleSheet.create({
   },
   menuItemText: {
     fontSize: 16,
-    color: '#374151',
+    color: COLORS.textPrimary,
     marginLeft: 12,
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     marginTop: 8,
     paddingVertical: 16,
     paddingHorizontal: 24,
@@ -503,7 +636,7 @@ const styles = StyleSheet.create({
   signOutText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#DC2626',
+    color: COLORS.danger,
     marginLeft: 8,
   },
   footer: {
@@ -512,7 +645,7 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: COLORS.textMuted,
   },
   modalOverlay: {
     position: 'absolute',
@@ -520,11 +653,11 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   optionsModal: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
@@ -538,22 +671,18 @@ const styles = StyleSheet.create({
   optionsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: COLORS.textPrimary,
   },
   optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: COLORS.border,
   },
   optionText: {
     fontSize: 16,
-    color: '#374151',
+    color: COLORS.textPrimary,
     marginLeft: 12,
-  },
-  optionIcon: {
-    width: 24,
-    height: 24,
   },
 });

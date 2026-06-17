@@ -33,6 +33,22 @@ import { supabase } from '@/lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Cores do tema: Preto e Dourado
+const COLORS = {
+  primary: '#D4AF37',
+  primaryDark: '#B8962E',
+  primaryLight: '#F5D98E',
+  background: '#000000',
+  backgroundCard: '#1A1A1A',
+  surface: '#2A2A2A',
+  text: '#FFFFFF',
+  textSecondary: '#B0B0B0',
+  border: '#333333',
+  success: '#D4AF37',
+  warning: '#F5A623',
+  error: '#FF4444',
+};
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface RideHistoryItem {
@@ -100,23 +116,20 @@ const calcDuration = (start: string | null, end: string | null): number => {
   return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000);
 };
 
-// Mapeamento corrigido - usando apenas os status que existem no enum
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
-  finalizada: { label: 'Concluída', color: '#059669', bg: '#ECFDF5' },
-  cancelada:  { label: 'Cancelada', color: '#DC2626', bg: '#FEF2F2' },
+  finalizada: { label: 'Concluída', color: COLORS.success, bg: COLORS.surface },
+  cancelada:  { label: 'Cancelada', color: COLORS.error, bg: COLORS.surface },
 };
 
 const getStatus = (status: string) =>
-  STATUS_MAP[status] ?? { label: status, color: '#6B7280', bg: '#F3F4F6' };
+  STATUS_MAP[status] ?? { label: status, color: COLORS.textSecondary, bg: COLORS.surface };
 
-// Função para obter texto mais descritivo baseado no status e dados adicionais
 const getDetailedStatus = (ride: RideHistoryItem): { label: string; color: string; bg: string } => {
   if (ride.status === 'cancelada') {
-    // Se foi cancelada e não tem motorista, foi cancelada pelo passageiro antes da aceitação
     if (!ride.motorista_id) {
-      return { label: 'Cancelada por você', color: '#DC2626', bg: '#FEF2F2' };
+      return { label: 'Cancelada por você', color: COLORS.error, bg: COLORS.surface };
     } else {
-      return { label: 'Cancelada', color: '#B45309', bg: '#FFFBEB' };
+      return { label: 'Cancelada', color: '#B45309', bg: COLORS.surface };
     }
   }
   return getStatus(ride.status);
@@ -132,8 +145,8 @@ const StarRow = ({ value, size = 16 }: { value: number | null; size?: number }) 
         <Star
           key={s}
           size={size}
-          color="#F59E0B"
-          fill={s <= value ? '#F59E0B' : 'transparent'}
+          color={COLORS.primary}
+          fill={s <= value ? COLORS.primary : 'transparent'}
         />
       ))}
       <Text style={styles.starValue}>{value}.0</Text>
@@ -210,7 +223,7 @@ const RideDetailModal = ({
             </Text>
           </View>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <X size={22} color="#374151" />
+            <X size={22} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -238,11 +251,11 @@ const RideDetailModal = ({
               pitchEnabled={false}
               rotateEnabled={false}
             >
-              <Marker coordinate={origin} title="Embarque" pinColor="#059669" />
-              <Marker coordinate={destination} title="Desembarque" pinColor="#DC2626" />
+              <Marker coordinate={origin} title="Embarque" pinColor={COLORS.success} />
+              <Marker coordinate={destination} title="Desembarque" pinColor={COLORS.error} />
               <Polyline
                 coordinates={[origin, destination]}
-                strokeColor="#1D4ED8"
+                strokeColor={COLORS.primary}
                 strokeWidth={3}
                 lineDashPattern={[8, 4]}
               />
@@ -250,11 +263,11 @@ const RideDetailModal = ({
 
             {/* Map overlay labels */}
             <View style={styles.mapOriginLabel}>
-              <View style={styles.mapLabelDot} />
+              <View style={[styles.mapLabelDot, { backgroundColor: COLORS.success }]} />
               <Text style={styles.mapLabelText} numberOfLines={1}>{ride.origem_endereco}</Text>
             </View>
             <View style={styles.mapDestLabel}>
-              <MapPin size={12} color="#DC2626" />
+              <MapPin size={12} color={COLORS.error} />
               <Text style={styles.mapLabelText} numberOfLines={1}>{ride.destino_endereco}</Text>
             </View>
           </View>
@@ -264,26 +277,26 @@ const RideDetailModal = ({
             <Text style={styles.sectionTitle}>Informações da Viagem</Text>
 
             <InfoRow
-              icon={<Navigation size={18} color="#1D4ED8" />}
+              icon={<Navigation size={18} color={COLORS.primary} />}
               label="Distância"
               value={`${Number(ride.distancia_km).toFixed(1)} km`}
             />
             {duration > 0 && (
               <InfoRow
-                icon={<Timer size={18} color="#7C3AED" />}
+                icon={<Timer size={18} color={COLORS.primary} />}
                 label="Duração"
                 value={formatDuration(duration)}
               />
             )}
             {ride.tempo_pausado > 0 && (
               <InfoRow
-                icon={<PauseCircle size={18} color="#B45309" />}
+                icon={<PauseCircle size={18} color={COLORS.warning} />}
                 label="Tempo pausado"
                 value={formatDuration(ride.tempo_pausado)}
               />
             )}
             <InfoRow
-              icon={<Route size={18} color="#6B7280" />}
+              icon={<Route size={18} color={COLORS.textSecondary} />}
               label="Multiplicador de tarifa"
               value={`${ride.multiplicador_tarifa}x`}
             />
@@ -294,14 +307,14 @@ const RideDetailModal = ({
             <Text style={styles.sectionTitle}>Valores</Text>
 
             <InfoRow
-              icon={<DollarSign size={18} color="#6B7280" />}
+              icon={<DollarSign size={18} color={COLORS.textSecondary} />}
               label="Valor estimado"
               value={`R$ ${Number(valorBase).toFixed(2)}`}
             />
 
             {temPausa && (
               <InfoRow
-                icon={<PauseCircle size={18} color="#B45309" />}
+                icon={<PauseCircle size={18} color={COLORS.warning} />}
                 label="Adicional de pausa"
                 value={`+ R$ ${Number(ride.valor_pausa).toFixed(2)}`}
                 highlight
@@ -310,7 +323,7 @@ const RideDetailModal = ({
 
             {temMulta && (
               <InfoRow
-                icon={<DollarSign size={18} color="#DC2626" />}
+                icon={<DollarSign size={18} color={COLORS.error} />}
                 label="Multa de cancelamento"
                 value={`R$ ${Number(ride.multa_cancelamento).toFixed(2)}`}
                 highlight
@@ -319,7 +332,7 @@ const RideDetailModal = ({
 
             {difPreco !== 0 && !temMulta && (
               <InfoRow
-                icon={<TrendingUp size={18} color={difPreco > 0 ? '#DC2626' : '#059669'} />}
+                icon={<TrendingUp size={18} color={difPreco > 0 ? COLORS.error : COLORS.success} />}
                 label={difPreco > 0 ? 'Adicional de rota' : 'Desconto aplicado'}
                 value={`${difPreco > 0 ? '+' : ''} R$ ${difPreco.toFixed(2)}`}
                 highlight
@@ -345,7 +358,7 @@ const RideDetailModal = ({
                     />
                   ) : (
                     <View style={styles.driverPhotoFallback}>
-                      <User size={28} color="#9CA3AF" />
+                      <User size={28} color={COLORS.textSecondary} />
                     </View>
                   )}
                 </View>
@@ -353,7 +366,7 @@ const RideDetailModal = ({
                   <Text style={styles.driverName}>{driverUser.nome_completo ?? '—'}</Text>
                   <StarRow value={driver.avaliacao_media} size={14} />
                   <View style={styles.vehicleRow}>
-                    <Car size={14} color="#6B7280" />
+                    <Car size={14} color={COLORS.textSecondary} />
                     <Text style={styles.vehicleText}>
                       {[driver.veiculo_modelo, driver.veiculo_cor, driver.veiculo_placa]
                         .filter(Boolean)
@@ -371,7 +384,7 @@ const RideDetailModal = ({
 
             <View style={styles.ratingBlock}>
               <View style={styles.ratingBlockHeader}>
-                <User size={16} color="#374151" />
+                <User size={16} color={COLORS.textSecondary} />
                 <Text style={styles.ratingBlockTitle}>Sua avaliação ao motorista</Text>
               </View>
               <StarRow value={ride.avaliacao_motorista} size={20} />
@@ -382,7 +395,7 @@ const RideDetailModal = ({
 
             <View style={[styles.ratingBlock, styles.ratingBlockAlt]}>
               <View style={styles.ratingBlockHeader}>
-                <Car size={16} color="#374151" />
+                <Car size={16} color={COLORS.textSecondary} />
                 <Text style={styles.ratingBlockTitle}>Avaliação do motorista a você</Text>
               </View>
               <StarRow value={ride.avaliacao_passageiro} size={20} />
@@ -411,7 +424,6 @@ export default function RideHistory() {
     try {
       setLoading(true);
       
-      // 1. Get authenticated user
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) {
         console.error('User error:', userError);
@@ -419,7 +431,6 @@ export default function RideHistory() {
         return;
       }
 
-      // 2. Find passageiro record
       const { data: passageiroData, error: passErr } = await supabase
         .from('passageiros')
         .select('id')
@@ -438,9 +449,6 @@ export default function RideHistory() {
         return;
       }
 
-      console.log('Passageiro ID:', passageiroData.id);
-
-      // 3. Fetch rides - usando apenas 'cancelada' como status de cancelamento
       const { data: corridasData, error: corridasError } = await supabase
         .from('corridas')
         .select(`
@@ -493,7 +501,6 @@ export default function RideHistory() {
         return;
       }
 
-      // 4. Fetch user data for each motorista
       const ridesWithUsers = await Promise.all(
         (corridasData as any[]).map(async (ride) => {
           if (ride.motoristas && ride.motoristas.usuario_id) {
@@ -536,7 +543,6 @@ export default function RideHistory() {
     fetchRides();
   }, [fetchRides]);
 
-  // Stats
   const completed = rides.filter((r) => r.status === 'finalizada');
   const cancelled = rides.filter((r) => r.status === 'cancelada');
 
@@ -544,7 +550,7 @@ export default function RideHistory() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1D4ED8" />
+          <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Carregando histórico...</Text>
         </View>
       </SafeAreaView>
@@ -552,7 +558,8 @@ export default function RideHistory() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Histórico de Corridas</Text>
         <Text style={styles.subtitle}>{rides.length} corridas</Text>
@@ -560,18 +567,17 @@ export default function RideHistory() {
 
       <ScrollView
         style={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1D4ED8" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         showsVerticalScrollIndicator={false}
       >
         {rides.length === 0 ? (
           <View style={styles.emptyState}>
-            <Clock size={64} color="#D1D5DB" />
+            <Clock size={64} color={COLORS.textSecondary} />
             <Text style={styles.emptyTitle}>Nenhuma corrida ainda</Text>
             <Text style={styles.emptySubtitle}>Suas corridas anteriores aparecerão aqui</Text>
           </View>
         ) : (
           <>
-            {/* Stats */}
             <View style={styles.statsCard}>
               <View style={styles.statItem}>
                 <Text style={styles.statNumber}>{completed.length}</Text>
@@ -584,7 +590,6 @@ export default function RideHistory() {
               </View>
             </View>
 
-            {/* Ride cards */}
             {rides.map((ride) => {
               const st = getDetailedStatus(ride);
               const driver = ride.motoristas;
@@ -598,7 +603,6 @@ export default function RideHistory() {
                   onPress={() => setSelected(ride)}
                   activeOpacity={0.75}
                 >
-                  {/* Card header */}
                   <View style={styles.cardHeader}>
                     <View>
                       <Text style={styles.cardDate}>{formatDate(ride.data_solicitacao)}</Text>
@@ -610,12 +614,11 @@ export default function RideHistory() {
                     </View>
                   </View>
 
-                  {/* Route */}
                   <View style={styles.routeContainer}>
                     <View style={styles.routeLeft}>
-                      <View style={styles.originDot} />
+                      <View style={[styles.originDot, { backgroundColor: COLORS.success }]} />
                       <View style={styles.routeConnector} />
-                      <MapPin size={14} color="#DC2626" />
+                      <MapPin size={14} color={COLORS.error} />
                     </View>
                     <View style={styles.routeRight}>
                       <Text style={styles.routeAddr} numberOfLines={1}>{ride.origem_endereco}</Text>
@@ -624,22 +627,21 @@ export default function RideHistory() {
                     </View>
                   </View>
 
-                  {/* Card footer */}
                   <View style={styles.cardFooter}>
                     <View style={styles.cardMeta}>
                       {duration > 0 && (
                         <View style={styles.metaItem}>
-                          <Timer size={13} color="#6B7280" />
+                          <Timer size={13} color={COLORS.textSecondary} />
                           <Text style={styles.metaText}>{formatDuration(duration)}</Text>
                         </View>
                       )}
                       <View style={styles.metaItem}>
-                        <Navigation size={13} color="#6B7280" />
+                        <Navigation size={13} color={COLORS.textSecondary} />
                         <Text style={styles.metaText}>{Number(ride.distancia_km).toFixed(1)} km</Text>
                       </View>
                       {ride.avaliacao_motorista && (
                         <View style={styles.metaItem}>
-                          <Star size={13} color="#F59E0B" fill="#F59E0B" />
+                          <Star size={13} color={COLORS.primary} fill={COLORS.primary} />
                           <Text style={styles.metaText}>{ride.avaliacao_motorista}.0</Text>
                         </View>
                       )}
@@ -648,18 +650,17 @@ export default function RideHistory() {
                       <Text style={styles.cardPrice}>
                         R$ {Number(ride.valor_final ?? ride.valor_estimado).toFixed(2)}
                       </Text>
-                      <ChevronRight size={16} color="#9CA3AF" />
+                      <ChevronRight size={16} color={COLORS.textSecondary} />
                     </View>
                   </View>
 
-                  {/* Driver mini info */}
                   {driver && driverUser && (
                     <View style={styles.driverMini}>
                       {driverUser.foto_perfil_url ? (
                         <Image source={{ uri: driverUser.foto_perfil_url }} style={styles.driverMiniPhoto} />
                       ) : (
                         <View style={styles.driverMiniPhotoFallback}>
-                          <User size={12} color="#9CA3AF" />
+                          <User size={12} color={COLORS.textSecondary} />
                         </View>
                       )}
                       <Text style={styles.driverMiniName} numberOfLines={1}>
@@ -685,119 +686,127 @@ export default function RideHistory() {
         visible={!!selected}
         onClose={() => setSelected(null)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#F3F4F6' },
+  container:        { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText:      { fontSize: 15, color: '#6B7280' },
+  loadingText:      { fontSize: 15, color: COLORS.textSecondary },
 
-  // Header
-  header:    { backgroundColor: '#FFFFFF', paddingHorizontal: 24, paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  title:     { fontSize: 24, fontWeight: '700', color: '#111827' },
-  subtitle:  { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  header: {
+    backgroundColor: COLORS.backgroundCard,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  title:     { fontSize: 24, fontWeight: '700', color: COLORS.text },
+  subtitle:  { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
 
   content: { flex: 1, padding: 16 },
 
-  // Empty
   emptyState:    { justifyContent: 'center', alignItems: 'center', paddingVertical: 80 },
-  emptyTitle:    { fontSize: 18, fontWeight: '600', color: '#6B7280', marginTop: 16 },
-  emptySubtitle: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', marginTop: 8 },
+  emptyTitle:    { fontSize: 18, fontWeight: '600', color: COLORS.textSecondary, marginTop: 16 },
+  emptySubtitle: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', marginTop: 8 },
 
-  // Stats
-  statsCard:   { flexDirection: 'row', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+  statsCard: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
   statItem:    { flex: 1, alignItems: 'center' },
-  statNumber:  { fontSize: 17, fontWeight: '700', color: '#111827', marginBottom: 2 },
-  statLabel:   { fontSize: 11, color: '#9CA3AF', textAlign: 'center' },
-  statDivider: { width: 1, backgroundColor: '#E5E7EB', marginHorizontal: 8 },
+  statNumber:  { fontSize: 17, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
+  statLabel:   { fontSize: 11, color: COLORS.textSecondary, textAlign: 'center' },
+  statDivider: { width: 1, backgroundColor: COLORS.border, marginHorizontal: 8 },
 
-  // Ride card
-  rideCard:       { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+  rideCard: {
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
   cardHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  cardDate:       { fontSize: 15, fontWeight: '600', color: '#111827' },
-  cardTime:       { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  cardDate:       { fontSize: 15, fontWeight: '600', color: COLORS.text },
+  cardTime:       { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   statusPill:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   statusDot:      { width: 7, height: 7, borderRadius: 4, marginRight: 5 },
   statusText:     { fontSize: 12, fontWeight: '600' },
   statusBadge:    { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16 },
 
-  // Route
   routeContainer:  { flexDirection: 'row', marginBottom: 14 },
   routeLeft:       { alignItems: 'center', marginRight: 12, paddingTop: 2 },
-  originDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: '#059669', marginBottom: 4 },
-  routeConnector:  { width: 2, flex: 1, backgroundColor: '#E5E7EB', marginVertical: 2 },
+  originDot:       { width: 10, height: 10, borderRadius: 5, marginBottom: 4 },
+  routeConnector:  { width: 2, flex: 1, backgroundColor: COLORS.border, marginVertical: 2 },
   routeRight:      { flex: 1, justifyContent: 'space-between' },
-  routeAddr:       { fontSize: 13, color: '#374151', lineHeight: 18 },
+  routeAddr:       { fontSize: 13, color: COLORS.text, lineHeight: 18 },
 
-  // Footer
-  cardFooter:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 12, marginTop: 4 },
+  cardFooter:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 12, marginTop: 4 },
   cardMeta:    { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
   metaItem:    { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText:    { fontSize: 12, color: '#6B7280' },
+  metaText:    { fontSize: 12, color: COLORS.textSecondary },
   cardRight:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardPrice:   { fontSize: 16, fontWeight: '700', color: '#111827' },
+  cardPrice:   { fontSize: 16, fontWeight: '700', color: COLORS.primary },
 
-  // Driver mini
-  driverMini:            { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  driverMini:            { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.border },
   driverMiniPhoto:       { width: 24, height: 24, borderRadius: 12, marginRight: 8 },
-  driverMiniPhotoFallback: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  driverMiniName:        { fontSize: 12, fontWeight: '600', color: '#374151' },
-  driverMiniCar:         { fontSize: 12, color: '#6B7280', flex: 1 },
+  driverMiniPhotoFallback: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  driverMiniName:        { fontSize: 12, fontWeight: '600', color: COLORS.text },
+  driverMiniCar:         { fontSize: 12, color: COLORS.textSecondary, flex: 1 },
 
-  // Modal
-  modalContainer:  { flex: 1, backgroundColor: '#F9FAFB' },
-  modalHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  modalTitle:      { fontSize: 20, fontWeight: '700', color: '#111827' },
-  modalSubtitle:   { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  closeBtn:        { padding: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
+  modalContainer:  { flex: 1, backgroundColor: COLORS.background },
+  modalHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: COLORS.backgroundCard, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  modalTitle:      { fontSize: 20, fontWeight: '700', color: COLORS.text },
+  modalSubtitle:   { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  closeBtn:        { padding: 8, borderRadius: 20, backgroundColor: COLORS.surface },
   modalScroll:     { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
 
-  // Map
-  mapContainer:    { height: 220, borderRadius: 16, overflow: 'hidden', marginBottom: 16, position: 'relative' },
+  mapContainer:    { height: 220, borderRadius: 16, overflow: 'hidden', marginBottom: 16, position: 'relative', borderWidth: 1, borderColor: COLORS.border },
   map:             { flex: 1 },
-  mapOriginLabel:  { position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
-  mapDestLabel:    { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
-  mapLabelDot:     { width: 8, height: 8, borderRadius: 4, backgroundColor: '#059669' },
-  mapLabelText:    { fontSize: 12, color: '#374151', flex: 1 },
+  mapOriginLabel:  { position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
+  mapDestLabel:    { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
+  mapLabelDot:     { width: 8, height: 8, borderRadius: 4 },
+  mapLabelText:    { fontSize: 12, color: COLORS.text, flex: 1 },
 
-  // Section
-  section:       { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
-  sectionTitle:  { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 14 },
+  section:       { backgroundColor: COLORS.backgroundCard, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: COLORS.border },
+  sectionTitle:  { fontSize: 15, fontWeight: '700', color: COLORS.text, marginBottom: 14 },
 
-  // Info row
   infoRow:             { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  infoIcon:            { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  infoIcon:            { width: 36, height: 36, borderRadius: 10, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   infoText:            { flex: 1 },
-  infoLabel:           { fontSize: 12, color: '#9CA3AF', marginBottom: 2 },
-  infoValue:           { fontSize: 14, fontWeight: '600', color: '#111827' },
-  infoValueHighlight:  { color: '#DC2626' },
+  infoLabel:           { fontSize: 12, color: COLORS.textSecondary, marginBottom: 2 },
+  infoValue:           { fontSize: 14, fontWeight: '600', color: COLORS.text },
+  infoValueHighlight:  { color: COLORS.primary },
 
-  // Total
-  totalRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F3F4F6', marginTop: 8, paddingTop: 14 },
-  totalLabel:  { fontSize: 15, fontWeight: '700', color: '#111827' },
-  totalValue:  { fontSize: 20, fontWeight: '800', color: '#1D4ED8' },
+  totalRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: COLORS.border, marginTop: 8, paddingTop: 14 },
+  totalLabel:  { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  totalValue:  { fontSize: 20, fontWeight: '800', color: COLORS.primary },
 
-  // Driver
   driverCard:          { flexDirection: 'row', alignItems: 'center' },
   driverAvatar:        { marginRight: 14 },
   driverPhoto:         { width: 60, height: 60, borderRadius: 30 },
-  driverPhotoFallback: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  driverPhotoFallback: { width: 60, height: 60, borderRadius: 30, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center' },
   driverInfo:          { flex: 1, gap: 4 },
-  driverName:          { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 2 },
+  driverName:          { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
   vehicleRow:          { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  vehicleText:         { fontSize: 13, color: '#6B7280', flex: 1 },
+  vehicleText:         { fontSize: 13, color: COLORS.textSecondary, flex: 1 },
 
-  // Ratings
-  ratingBlock:       { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, marginBottom: 10 },
-  ratingBlockAlt:    { backgroundColor: '#F0F9FF' },
+  ratingBlock:       { backgroundColor: COLORS.surface, borderRadius: 12, padding: 14, marginBottom: 10 },
+  ratingBlockAlt:    { backgroundColor: COLORS.backgroundCard },
   ratingBlockHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  ratingBlockTitle:  { fontSize: 13, fontWeight: '600', color: '#374151' },
+  ratingBlockTitle:  { fontSize: 13, fontWeight: '600', color: COLORS.text },
   starRow:           { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  starValue:         { fontSize: 14, fontWeight: '600', color: '#F59E0B', marginLeft: 6 },
-  noRating:          { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
-  comment:           { fontSize: 13, color: '#374151', fontStyle: 'italic', marginTop: 10, lineHeight: 18 },
+  starValue:         { fontSize: 14, fontWeight: '600', color: COLORS.primary, marginLeft: 6 },
+  noRating:          { fontSize: 13, color: COLORS.textSecondary, fontStyle: 'italic' },
+  comment:           { fontSize: 13, color: COLORS.textSecondary, fontStyle: 'italic', marginTop: 10, lineHeight: 18 },
 });

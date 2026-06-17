@@ -1,6 +1,6 @@
 // app/(tabs)/index.tsx
 import 'react-native-get-random-values';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,34 +11,28 @@ import {
   Animated,
   Dimensions,
   Platform,
-  AppState,
-  AppStateStatus,
   Modal,
   TextInput,
-  FlatList,
-  KeyboardAvoidingView,
   Share,
   Linking,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
   MapPin,
   Navigation,
   CreditCard,
   Banknote,
-  Crosshair,
   X,
   Check,
   Zap,
   Clock,
-  MapIcon,
   Car,
   User,
   Star,
@@ -49,9 +43,15 @@ import {
   Share2,
   Shield,
   PhoneCall,
+  Camera,
 } from 'lucide-react-native';
 import Constants from 'expo-constants';
 import { ChatModal } from '@/components/ChatModal';
+import { DriverCurrentRideCard } from '@/components/DriverCurrentRideCard';
+import { useCorridaAtiva } from '@/hooks/useCorridaAtiva';
+import { useProfilePhoto } from '@/hooks/useProfilePhoto';
+import { decodePolyline } from '@/utils/decodePolyline';
+import { MapPickerModal } from '@/components/MapPickerModal';
 
 const GOOGLE_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -60,32 +60,8 @@ const SANTA_RITA_COORDS = { latitude: -22.2464, longitude: -45.7033 };
 const PRICE_PER_KM = 3.15;
 const MINIMUM_FARE = 8.0;
 const SPEED_KMH = 25;
-const CANCELLATION_PENALTY_MINUTES = 3;
 const CANCELLATION_PENALTY_AMOUNT = 3.5;
-
-function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  const poly: { latitude: number; longitude: number }[] = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b, shift = 0, result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-    shift = 0;
-    result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-    poly.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
-  return poly;
-}
+const CANCEL_FREE_MINUTES = 3;
 
 function isNightTime(): boolean {
   const now = new Date();
@@ -109,7 +85,7 @@ const BLOCK_REASONS = [
   { id: 'other', label: 'Outro motivo' },
 ];
 
-type RideStep = 'idle' | 'selecting_dest' | 'confirming' | 'searching' | 'accepted' | 'in_progress' | 'completed';
+type RideStep = 'idle' | 'selecting_dest' | 'confirming' | 'searching' | 'accepted' | 'in_progress' | 'completed' | 'reservada';
 type ManualSelectTarget = 'origin' | 'dest' | null;
 
 interface RatingModalProps {
@@ -144,7 +120,203 @@ interface DriverProfileModalProps {
   onBlockDriver: (reason: string) => void;
 }
 
-// ─── COMPONENTE DE PERFIL DO MOTORISTA ────────────────────────────────────
+// ─── Modal: Sem foto de perfil ────────────────────────────────────────────────
+
+interface NoProfilePhotoModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onGoToProfile: () => void;
+}
+
+function NoProfilePhotoModal({ visible, onClose, onGoToProfile }: NoProfilePhotoModalProps) {
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 60,
+        friction: 10,
+      }).start();
+    } else {
+      scaleAnim.setValue(0);
+    }
+  }, [visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={noPhotoStyles.overlay}>
+        <Animated.View style={[noPhotoStyles.card, { transform: [{ scale: scaleAnim }] }]}>
+          {/* Ícone */}
+          <View style={noPhotoStyles.iconContainer}>
+            <Camera size={36} color="#1E40AF" />
+          </View>
+
+          <Text style={noPhotoStyles.title}>Foto de perfil necessária</Text>
+          <Text style={noPhotoStyles.description}>
+            Para solicitar corridas, você precisa ter uma foto de perfil cadastrada.{'\n\n'}
+            Acesse a aba <Text style={noPhotoStyles.bold}>Perfil</Text> para adicionar sua foto e começar a usar o app.
+          </Text>
+
+          <TouchableOpacity style={noPhotoStyles.primaryBtn} onPress={onGoToProfile}>
+            <Camera size={18} color="#FFF" />
+            <Text style={noPhotoStyles.primaryBtnText}>Ir para o Perfil</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={noPhotoStyles.secondaryBtn} onPress={onClose}>
+            <Text style={noPhotoStyles.secondaryBtnText}>Agora não</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── MODAIS ──────────────────────────────────────────────────────────────
+
+function RatingModal({ visible, rideId, driverName, price, distance, onClose, usuarioId }: RatingModalProps) {
+  const [driverRating, setDriverRating] = useState(0);
+  const [serviceRating, setServiceRating] = useState(0);
+  const [comentario, setComentario] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setDriverRating(0); setServiceRating(0); setComentario('');
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 10 }).start();
+    } else { scaleAnim.setValue(0); }
+  }, [visible]);
+
+  const handleSubmit = async () => {
+    if (driverRating === 0) { Alert.alert('Avaliação', 'Por favor, avalie o motorista antes de continuar.'); return; }
+    setSubmitting(true);
+    try {
+      const { data: corrida } = await supabase.from('corridas').select('motorista_id, passageiro_id').eq('id', rideId).single();
+      if (corrida?.motorista_id) {
+        const { data: motorista } = await supabase.from('motoristas').select('usuario_id').eq('id', corrida.motorista_id).single();
+        const { data: passageiro } = await supabase.from('passageiros').select('usuario_id').eq('id', corrida.passageiro_id).single();
+        if (motorista?.usuario_id && passageiro?.usuario_id) {
+          await supabase.from('avaliacoes').insert({ corrida_id: rideId, avaliador_id: passageiro.usuario_id, avaliado_id: motorista.usuario_id, tipo_avaliador: 'passageiro', nota: driverRating, comentario: comentario.trim() || null });
+          const { data: allRatings } = await supabase.from('avaliacoes').select('nota').eq('avaliado_id', motorista.usuario_id).eq('tipo_avaliador', 'passageiro');
+          if (allRatings && allRatings.length > 0) {
+            const avg = allRatings.reduce((sum, r) => sum + r.nota, 0) / allRatings.length;
+            await supabase.from('motoristas').update({ avaliacao_media: avg }).eq('id', corrida.motorista_id);
+          }
+          await supabase.from('corridas').update({ avaliacao_motorista: driverRating, comentario_passageiro: comentario.trim() || null }).eq('id', rideId);
+        }
+      }
+      Alert.alert('Obrigado!', 'Sua avaliação foi enviada com sucesso.');
+    } catch (err) { console.error('Erro ao enviar avaliação:', err); }
+    finally { setSubmitting(false); onClose(); }
+  };
+
+  const StarRow = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
+    <View style={ratingStyles.starSection}>
+      <Text style={ratingStyles.starLabel}>{label}</Text>
+      <View style={ratingStyles.starsRow}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <TouchableOpacity key={star} onPress={() => onChange(star)} style={ratingStyles.starBtn}>
+            <Star size={32} color={star <= value ? '#FBBF24' : '#E5E7EB'} fill={star <= value ? '#FBBF24' : 'transparent'} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={ratingStyles.overlay}>
+        <Animated.View style={[ratingStyles.card, { transform: [{ scale: scaleAnim }] }]}>
+          <View style={ratingStyles.header}>
+            <View style={ratingStyles.checkCircle}><Check size={28} color="#FFF" /></View>
+            <Text style={ratingStyles.title}>Corrida finalizada!</Text>
+            <Text style={ratingStyles.subtitle}>Como foi sua experiência?</Text>
+          </View>
+          <View style={ratingStyles.summary}>
+            <View style={ratingStyles.summaryItem}><Text style={ratingStyles.summaryLabel}>Motorista</Text><Text style={ratingStyles.summaryValue}>{driverName}</Text></View>
+            {distance && <View style={ratingStyles.summaryItem}><Text style={ratingStyles.summaryLabel}>Distância</Text><Text style={ratingStyles.summaryValue}>{distance}</Text></View>}
+            {price && <View style={ratingStyles.summaryItem}><Text style={ratingStyles.summaryLabel}>Valor</Text><Text style={[ratingStyles.summaryValue, { color: '#1E40AF' }]}>R$ {price.toFixed(2)}</Text></View>}
+          </View>
+          <StarRow label="Avalie o motorista" value={driverRating} onChange={setDriverRating} />
+          <StarRow label="Avalie o serviço" value={serviceRating} onChange={setServiceRating} />
+          <TextInput style={ratingStyles.commentInput} placeholder="Deixe um comentário (opcional)..." placeholderTextColor="#9CA3AF" value={comentario} onChangeText={setComentario} multiline numberOfLines={3} maxLength={200} />
+          <View style={ratingStyles.actions}>
+            <TouchableOpacity style={ratingStyles.skipBtn} onPress={onClose}><Text style={ratingStyles.skipText}>Pular</Text></TouchableOpacity>
+            <TouchableOpacity style={[ratingStyles.submitBtn, submitting && { opacity: 0.7 }]} onPress={handleSubmit} disabled={submitting}>
+              {submitting ? <ActivityIndicator color="#FFF" size="small" /> : <><ThumbsUp size={18} color="#FFF" /><Text style={ratingStyles.submitText}>Enviar avaliação</Text></>}
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function AlertModal({ visible, driverName, originAddress, destAddress, driverCoord, onClose, onShareRide, onReportDriver, onCallPolice, onCallSAMU }: AlertModalProps) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={alertStyles.overlay}>
+        <View style={alertStyles.card}>
+          <View style={alertStyles.header}>
+            <View style={alertStyles.iconContainer}>
+              <AlertTriangle size={32} color="#EF4444" />
+            </View>
+            <Text style={alertStyles.title}>Central de Alerta</Text>
+            <Text style={alertStyles.subtitle}>Escolha uma opção de emergência</Text>
+          </View>
+          <View style={alertStyles.optionsContainer}>
+            <TouchableOpacity style={alertStyles.optionBtn} onPress={onShareRide}>
+              <View style={[alertStyles.optionIcon, { backgroundColor: '#EFF6FF' }]}>
+                <Share2 size={24} color="#1E40AF" />
+              </View>
+              <View style={alertStyles.optionInfo}>
+                <Text style={alertStyles.optionTitle}>Compartilhar Corrida</Text>
+                <Text style={alertStyles.optionDesc}>Enviar detalhes via WhatsApp/SMS</Text>
+              </View>
+              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
+            </TouchableOpacity>
+            <TouchableOpacity style={alertStyles.optionBtn} onPress={onReportDriver}>
+              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEF3C7' }]}>
+                <Shield size={24} color="#D97706" />
+              </View>
+              <View style={alertStyles.optionInfo}>
+                <Text style={alertStyles.optionTitle}>Denunciar Motorista</Text>
+                <Text style={alertStyles.optionDesc}>Reportar comportamento inadequado</Text>
+              </View>
+              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
+            </TouchableOpacity>
+            <TouchableOpacity style={alertStyles.optionBtn} onPress={onCallPolice}>
+              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEE2E2' }]}>
+                <PhoneCall size={24} color="#DC2626" />
+              </View>
+              <View style={alertStyles.optionInfo}>
+                <Text style={alertStyles.optionTitle}>Ligar para Polícia</Text>
+                <Text style={alertStyles.optionDesc}>Emergência - Disque 190</Text>
+              </View>
+              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
+            </TouchableOpacity>
+            <TouchableOpacity style={alertStyles.optionBtn} onPress={onCallSAMU}>
+              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEE2E2' }]}>
+                <PhoneCall size={24} color="#DC2626" />
+              </View>
+              <View style={alertStyles.optionInfo}>
+                <Text style={alertStyles.optionTitle}>Ligar para SAMU</Text>
+                <Text style={alertStyles.optionDesc}>Emergência médica - 192</Text>
+              </View>
+              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={alertStyles.closeBtn} onPress={onClose}>
+            <Text style={alertStyles.closeText}>Fechar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function DriverProfileModal({ visible, driverId, driverName, driverRating, onClose, onBlockDriver }: DriverProfileModalProps) {
   const [loading, setLoading] = useState(true);
   const [showBlockReasons, setShowBlockReasons] = useState(false);
@@ -217,7 +389,6 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
       <View style={driverProfileStyles.overlay}>
         <View style={driverProfileStyles.card}>
           <View style={driverProfileStyles.handle} />
-
           {loading ? (
             <View style={driverProfileStyles.loadingContainer}>
               <ActivityIndicator size="large" color="#1E40AF" />
@@ -233,24 +404,13 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
                 {BLOCK_REASONS.map((reason) => (
                   <TouchableOpacity
                     key={reason.id}
-                    style={[
-                      driverProfileStyles.reasonItem,
-                      selectedBlockReason === reason.id && driverProfileStyles.reasonItemSelected,
-                    ]}
+                    style={[driverProfileStyles.reasonItem, selectedBlockReason === reason.id && driverProfileStyles.reasonItemSelected]}
                     onPress={() => setSelectedBlockReason(reason.id)}
                   >
-                    <View style={[
-                      driverProfileStyles.reasonRadio,
-                      selectedBlockReason === reason.id && driverProfileStyles.reasonRadioSelected,
-                    ]}>
-                      {selectedBlockReason === reason.id && (
-                        <View style={driverProfileStyles.reasonRadioInner} />
-                      )}
+                    <View style={[driverProfileStyles.reasonRadio, selectedBlockReason === reason.id && driverProfileStyles.reasonRadioSelected]}>
+                      {selectedBlockReason === reason.id && <View style={driverProfileStyles.reasonRadioInner} />}
                     </View>
-                    <Text style={[
-                      driverProfileStyles.reasonLabel,
-                      selectedBlockReason === reason.id && driverProfileStyles.reasonLabelSelected,
-                    ]}>
+                    <Text style={[driverProfileStyles.reasonLabel, selectedBlockReason === reason.id && driverProfileStyles.reasonLabelSelected]}>
                       {reason.label}
                     </Text>
                   </TouchableOpacity>
@@ -284,7 +444,6 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
                   <Text style={driverProfileStyles.ratingText}>{profile.avaliacao_media?.toFixed(1) || driverRating.toFixed(1)}</Text>
                 </View>
               </View>
-
               <View style={driverProfileStyles.section}>
                 <Text style={driverProfileStyles.sectionTitle}>🚗 Veículo</Text>
                 <View style={driverProfileStyles.infoGrid}>
@@ -302,7 +461,6 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
                   </View>
                 </View>
               </View>
-
               <View style={driverProfileStyles.section}>
                 <Text style={driverProfileStyles.sectionTitle}>📊 Estatísticas</Text>
                 <View style={driverProfileStyles.statsContainer}>
@@ -317,15 +475,10 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
                   </View>
                 </View>
               </View>
-
-              <TouchableOpacity
-                style={driverProfileStyles.blockBtn}
-                onPress={() => setShowBlockReasons(true)}
-              >
+              <TouchableOpacity style={driverProfileStyles.blockBtn} onPress={() => setShowBlockReasons(true)}>
                 <Shield size={20} color="#DC2626" />
                 <Text style={driverProfileStyles.blockBtnText}>Bloquear para futuras corridas</Text>
               </TouchableOpacity>
-
               <TouchableOpacity style={driverProfileStyles.closeBtn} onPress={onClose}>
                 <Text style={driverProfileStyles.closeBtnText}>Fechar</Text>
               </TouchableOpacity>
@@ -337,499 +490,90 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
   );
 }
 
-// ─── COMPONENTE DE ALERTA ─────────────────────────────────────────────────
-function AlertModal({ visible, driverName, originAddress, destAddress, driverCoord, onClose, onShareRide, onReportDriver, onCallPolice, onCallSAMU }: AlertModalProps) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={alertStyles.overlay}>
-        <View style={alertStyles.card}>
-          <View style={alertStyles.header}>
-            <View style={alertStyles.iconContainer}>
-              <AlertTriangle size={32} color="#EF4444" />
-            </View>
-            <Text style={alertStyles.title}>Central de Alerta</Text>
-            <Text style={alertStyles.subtitle}>Escolha uma opção de emergência</Text>
-          </View>
-
-          <View style={alertStyles.optionsContainer}>
-            <TouchableOpacity style={alertStyles.optionBtn} onPress={onShareRide}>
-              <View style={[alertStyles.optionIcon, { backgroundColor: '#EFF6FF' }]}>
-                <Share2 size={24} color="#1E40AF" />
-              </View>
-              <View style={alertStyles.optionInfo}>
-                <Text style={alertStyles.optionTitle}>Compartilhar Corrida</Text>
-                <Text style={alertStyles.optionDesc}>Enviar detalhes via WhatsApp/SMS</Text>
-              </View>
-              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={alertStyles.optionBtn} onPress={onReportDriver}>
-              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEF3C7' }]}>
-                <Shield size={24} color="#D97706" />
-              </View>
-              <View style={alertStyles.optionInfo}>
-                <Text style={alertStyles.optionTitle}>Denunciar Motorista</Text>
-                <Text style={alertStyles.optionDesc}>Reportar comportamento inadequado</Text>
-              </View>
-              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={alertStyles.optionBtn} onPress={onCallPolice}>
-              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEE2E2' }]}>
-                <PhoneCall size={24} color="#DC2626" />
-              </View>
-              <View style={alertStyles.optionInfo}>
-                <Text style={alertStyles.optionTitle}>Ligar para Polícia</Text>
-                <Text style={alertStyles.optionDesc}>Emergência - Disque 190</Text>
-              </View>
-              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={alertStyles.optionBtn} onPress={onCallSAMU}>
-              <View style={[alertStyles.optionIcon, { backgroundColor: '#FEE2E2' }]}>
-                <PhoneCall size={24} color="#DC2626" />
-              </View>
-              <View style={alertStyles.optionInfo}>
-                <Text style={alertStyles.optionTitle}>Ligar para SAMU</Text>
-                <Text style={alertStyles.optionDesc}>Emergência médica - 192</Text>
-              </View>
-              <ChevronDown size={20} color="#9CA3AF" style={{ transform: [{ rotate: '-90deg' }] }} />
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={alertStyles.closeBtn} onPress={onClose}>
-            <Text style={alertStyles.closeText}>Fechar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-// ─── COMPONENTE DE AVALIAÇÃO ──────────────────────────────────────────────
-function RatingModal({ visible, rideId, driverName, price, distance, onClose, usuarioId }: RatingModalProps) {
-  const [driverRating, setDriverRating] = useState(0);
-  const [serviceRating, setServiceRating] = useState(0);
-  const [comentario, setComentario] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (visible) {
-      setDriverRating(0);
-      setServiceRating(0);
-      setComentario('');
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 60,
-        friction: 10,
-      }).start();
-    } else {
-      scaleAnim.setValue(0);
-    }
-  }, [visible]);
-
-  const handleSubmit = async () => {
-    if (driverRating === 0) {
-      Alert.alert('Avaliação', 'Por favor, avalie o motorista antes de continuar.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const { data: corrida } = await supabase
-        .from('corridas')
-        .select('motorista_id, passageiro_id')
-        .eq('id', rideId)
-        .single();
-
-      if (corrida?.motorista_id) {
-        const { data: motorista } = await supabase
-          .from('motoristas')
-          .select('usuario_id')
-          .eq('id', corrida.motorista_id)
-          .single();
-
-        const { data: passageiro } = await supabase
-          .from('passageiros')
-          .select('usuario_id')
-          .eq('id', corrida.passageiro_id)
-          .single();
-
-        if (motorista?.usuario_id && passageiro?.usuario_id) {
-          await supabase.from('avaliacoes').insert({
-            corrida_id: rideId,
-            avaliador_id: passageiro.usuario_id,
-            avaliado_id: motorista.usuario_id,
-            tipo_avaliador: 'passageiro',
-            nota: driverRating,
-            comentario: comentario.trim() || null,
-          });
-
-          const { data: allRatings } = await supabase
-            .from('avaliacoes')
-            .select('nota')
-            .eq('avaliado_id', motorista.usuario_id)
-            .eq('tipo_avaliador', 'passageiro');
-
-          if (allRatings && allRatings.length > 0) {
-            const avg = allRatings.reduce((sum, r) => sum + r.nota, 0) / allRatings.length;
-            await supabase
-              .from('motoristas')
-              .update({ avaliacao_media: avg })
-              .eq('id', corrida.motorista_id);
-          }
-
-          await supabase
-            .from('corridas')
-            .update({
-              avaliacao_motorista: driverRating,
-              comentario_passageiro: comentario.trim() || null,
-            })
-            .eq('id', rideId);
-        }
-      }
-
-      Alert.alert('Obrigado!', 'Sua avaliação foi enviada com sucesso.');
-    } catch (err) {
-      console.error('Erro ao enviar avaliação:', err);
-    } finally {
-      setSubmitting(false);
-      onClose();
-    }
-  };
-
-  const StarRow = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
-    <View style={ratingStyles.starSection}>
-      <Text style={ratingStyles.starLabel}>{label}</Text>
-      <View style={ratingStyles.starsRow}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <TouchableOpacity key={star} onPress={() => onChange(star)} style={ratingStyles.starBtn}>
-            <Star size={32} color={star <= value ? '#FBBF24' : '#E5E7EB'} fill={star <= value ? '#FBBF24' : 'transparent'} />
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={ratingStyles.overlay}>
-        <Animated.View style={[ratingStyles.card, { transform: [{ scale: scaleAnim }] }]}>
-          <View style={ratingStyles.header}>
-            <View style={ratingStyles.checkCircle}>
-              <Check size={28} color="#FFF" />
-            </View>
-            <Text style={ratingStyles.title}>Corrida finalizada!</Text>
-            <Text style={ratingStyles.subtitle}>Como foi sua experiência?</Text>
-          </View>
-
-          <View style={ratingStyles.summary}>
-            <View style={ratingStyles.summaryItem}>
-              <Text style={ratingStyles.summaryLabel}>Motorista</Text>
-              <Text style={ratingStyles.summaryValue}>{driverName}</Text>
-            </View>
-            {distance && (
-              <View style={ratingStyles.summaryItem}>
-                <Text style={ratingStyles.summaryLabel}>Distância</Text>
-                <Text style={ratingStyles.summaryValue}>{distance}</Text>
-              </View>
-            )}
-            {price && (
-              <View style={ratingStyles.summaryItem}>
-                <Text style={ratingStyles.summaryLabel}>Valor</Text>
-                <Text style={[ratingStyles.summaryValue, { color: '#1E40AF' }]}>R$ {price.toFixed(2)}</Text>
-              </View>
-            )}
-          </View>
-
-          <StarRow label="Avalie o motorista" value={driverRating} onChange={setDriverRating} />
-          <StarRow label="Avalie o serviço" value={serviceRating} onChange={setServiceRating} />
-
-          <TextInput
-            style={ratingStyles.commentInput}
-            placeholder="Deixe um comentário (opcional)..."
-            placeholderTextColor="#9CA3AF"
-            value={comentario}
-            onChangeText={setComentario}
-            multiline
-            numberOfLines={3}
-            maxLength={200}
-          />
-
-          <View style={ratingStyles.actions}>
-            <TouchableOpacity style={ratingStyles.skipBtn} onPress={onClose}>
-              <Text style={ratingStyles.skipText}>Pular</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[ratingStyles.submitBtn, submitting && { opacity: 0.7 }]} onPress={handleSubmit} disabled={submitting}>
-              {submitting ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <>
-                  <ThumbsUp size={18} color="#FFF" />
-                  <Text style={ratingStyles.submitText}>Enviar avaliação</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-}
-
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────
+
 export default function PassengerHome() {
   const { usuario } = useAuth();
   const router = useRouter();
-  const appState = useRef(AppState.currentState);
+  const insets = useSafeAreaInsets();
+
   const mapRef = useRef<MapView>(null);
   const originAutocompleteRef = useRef<any>(null);
   const destAutocompleteRef = useRef<any>(null);
   const rideTimerRef = useRef<any>(null);
   const pollRideRef = useRef<any>(null);
-  const locationUpdateRef = useRef<any>(null);
-  const hasCheckedInitialRide = useRef(false);
-  const driverMarkerRef = useRef<any>(null);
   const locationWatcherRef = useRef<any>(null);
+  const driverMarkerRef = useRef<any>(null);
 
-  // Location
+  const { corridaAtiva, loading: loadingCorrida } = useCorridaAtiva();
+
+  // ── Hook de verificação de foto de perfil ──
+  const { hasFotoProfile, loading: loadingFoto, refetch: refetchFoto } = useProfilePhoto(usuario?.id);
+
+  const [showNoPhotoModal, setShowNoPhotoModal] = useState(false);
+
   const [originCoord, setOriginCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [originAddress, setOriginAddress] = useState('');
   const [region, setRegion] = useState<Region>({ ...SANTA_RITA_COORDS, latitudeDelta: 0.04, longitudeDelta: 0.04 });
-
-  // Destination
   const [destCoord, setDestCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [destAddress, setDestAddress] = useState('');
-
-  // Route
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [distance, setDistance] = useState<string | null>(null);
   const [duration, setDuration] = useState<string | null>(null);
   const [price, setPrice] = useState<number | null>(null);
-
-  // UI State
   const [step, setStep] = useState<RideStep>('idle');
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [selectedPayment, setSelectedPayment] = useState('pix');
   const [manualSelectTarget, setManualSelectTarget] = useState<ManualSelectTarget>(null);
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+  const [currentRideCreatedAt, setCurrentRideCreatedAt] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-
-  // Ride State
   const [driverCoord, setDriverCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
   const [driverRating, setDriverRating] = useState(5);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [driverPreviousCoord, setDriverPreviousCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [driverId, setDriverId] = useState<string | null>(null);
-
-  // Vehicle info for driver card
   const [driverCarModel, setDriverCarModel] = useState('');
   const [driverCarColor, setDriverCarColor] = useState('');
   const [driverTotalRides, setDriverTotalRides] = useState<number>(0);
-
-  // Chat, Alerta e Perfil
   const [showChat, setShowChat] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [showDriverProfile, setShowDriverProfile] = useState(false);
-
-  // Mapa noturno
   const [isNight, setIsNight] = useState(isNightTime());
-
-  // Rota do motorista
   const [driverRouteCoords, setDriverRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [driverToPickupDistance, setDriverToPickupDistance] = useState<string | null>(null);
   const [driverToPickupDuration, setDriverToPickupDuration] = useState<string | null>(null);
-
-  // Modal de avaliação
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [completedRideId, setCompletedRideId] = useState<string | null>(null);
   const [completedDriverName, setCompletedDriverName] = useState('');
+  const [showDriverCurrentRide, setShowDriverCurrentRide] = useState(false);
+  const [reservedRouteDriverToDropoff, setReservedRouteDriverToDropoff] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [reservedRouteDropoffToOrigin, setReservedRouteDropoffToOrigin] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [reservedDropoffCoord, setReservedDropoffCoord] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  // Animations
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [mapPickerTarget, setMapPickerTarget] = useState<'origin' | 'dest' | null>(null);
+
   const cardAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  // ─── Helper: buscar informações completas do veículo e corridas do motorista ───
   const fetchDriverVehicleInfo = async (motoristaId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('motoristas')
-        .select('veiculo_modelo, veiculo_cor, total_corridas')
-        .eq('id', motoristaId)
-        .single();
-      if (!error && data) {
-        setDriverCarModel(data.veiculo_modelo || '');
-        setDriverCarColor(data.veiculo_cor || '');
-        setDriverTotalRides(data.total_corridas || 0);
-      } else {
-        setDriverCarModel('');
-        setDriverCarColor('');
-        setDriverTotalRides(0);
-      }
-    } catch (err) {
-      console.error('Erro ao buscar veículo:', err);
-    }
+      const { data, error } = await supabase.from('motoristas').select('veiculo_modelo, veiculo_cor, total_corridas').eq('id', motoristaId).single();
+      if (!error && data) { setDriverCarModel(data.veiculo_modelo || ''); setDriverCarColor(data.veiculo_cor || ''); setDriverTotalRides(data.total_corridas || 0); }
+    } catch (err) { console.error('Erro ao buscar veículo:', err); }
   };
 
-  // ─── HANDLERS ───────────────────────────────────────────────────────────
-  const handleShareRide = async () => {
-    if (!driverName || !currentRideId) return;
-
-    const trackingLink = driverCoord
-      ? `https://www.google.com/maps?q=${driverCoord.latitude},${driverCoord.longitude}`
-      : '';
-
-    const message = `🚗 *Corrida em andamento - Rastreamento ao vivo*\n\n` +
-      `👤 Motorista: ${driverName}\n` +
-      `⭐ Avaliação: ${driverRating.toFixed(1)}\n\n` +
-      `📍 Embarque: ${originAddress}\n` +
-      `🎯 Destino: ${destAddress}\n\n` +
-      `📏 Distância: ${distance || 'Calculando...'}\n` +
-      `⏱ Tempo estimado: ${duration || 'Calculando...'}\n\n` +
-      `${trackingLink ? `🔍 Rastrear motorista em tempo real:\n${trackingLink}\n\n` : ''}` +
-      `_Localização atualizada automaticamente_`;
-
-    try {
-      await Share.share({
-        message: message,
-        title: 'Minha corrida - Rastreamento ao vivo',
-      });
-    } catch (error) {
-      console.error('Erro ao compartilhar:', error);
-    }
-
-    setShowAlertModal(false);
+  const calculateDistance = (c1: { latitude: number; longitude: number }, c2: { latitude: number; longitude: number }): number => {
+    const R = 6371;
+    const dLat = ((c2.latitude - c1.latitude) * Math.PI) / 180;
+    const dLon = ((c2.longitude - c1.longitude) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos((c1.latitude * Math.PI) / 180) * Math.cos((c2.latitude * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
-
-  const handleReportDriver = () => {
-    setShowAlertModal(false);
-    Alert.alert(
-      'Denunciar Motorista',
-      'Deseja realmente denunciar este motorista? Nossa equipe analisará sua denúncia.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Denunciar',
-          style: 'destructive',
-          onPress: async () => {
-            if (currentRideId) {
-              try {
-                await supabase
-                  .from('corridas')
-                  .update({
-                    denuncia_motorista: true,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq('id', currentRideId);
-
-                Alert.alert('Denúncia enviada', 'Sua denúncia foi registrada. Nossa equipe irá analisar.');
-              } catch (err) {
-                console.error('Erro ao denunciar:', err);
-                Alert.alert('Erro', 'Não foi possível registrar a denúncia.');
-              }
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  const handleCallPolice = () => {
-    setShowAlertModal(false);
-    Alert.alert(
-      'Ligar para Polícia (190)',
-      'Deseja realmente ligar para a polícia? Esta é uma ação de emergência.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Ligar 190',
-          style: 'destructive',
-          onPress: () => {
-            Linking.openURL('tel:190');
-          }
-        }
-      ]
-    );
-  };
-
-  const handleCallSAMU = () => {
-    setShowAlertModal(false);
-    Alert.alert(
-      'Ligar para SAMU (192)',
-      'Deseja realmente ligar para o SAMU? Esta é uma ação de emergência médica.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Ligar 192',
-          style: 'destructive',
-          onPress: () => {
-            Linking.openURL('tel:192');
-          }
-        }
-      ]
-    );
-  };
-
-  const handleViewDriverProfile = () => {
-    if (driverId) {
-      setShowDriverProfile(true);
-    }
-  };
-
-  const handleBlockDriver = async (reason: string) => {
-    setShowDriverProfile(false);
-    if (usuario && driverId) {
-      try {
-        const { data: passenger } = await supabase
-          .from('passageiros')
-          .select('id')
-          .eq('usuario_id', usuario.id)
-          .single();
-
-        if (passenger) {
-          await supabase.from('motoristas_bloqueados').insert({
-            passageiro_id: passenger.id,
-            motorista_id: driverId,
-            created_at: new Date().toISOString(),
-          });
-
-          Alert.alert('Motorista bloqueado', `Motorista bloqueado por: ${reason}. Ele não será alocado para suas próximas corridas.`);
-        }
-      } catch (err) {
-        console.error('Erro ao bloquear motorista:', err);
-        Alert.alert('Erro', 'Não foi possível bloquear o motorista.');
-      }
-    }
-  };
-
-  // ─── ATUALIZAR MODO NOTURNO ─────────────────────────────────────────────
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setIsNight(isNightTime());
-    }, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ─── ANIMAÇÃO DE PULSO ──────────────────────────────────────────────────
-  useEffect(() => {
-    if ((step === 'accepted' || step === 'in_progress') && driverCoord) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.3, duration: 1000, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        ])
-      );
-      pulse.start();
-      return () => pulse.stop();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [step, driverCoord]);
 
   const mapStatusToStep = (status: string): RideStep => {
     switch (status) {
@@ -837,59 +581,10 @@ export default function PassengerHome() {
       case 'aceita': return 'accepted';
       case 'iniciada': return 'in_progress';
       case 'finalizada': return 'completed';
+      case 'reservada': return 'reservada';
       default: return 'idle';
     }
   };
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!hasCheckedInitialRide.current && usuario) {
-        hasCheckedInitialRide.current = true;
-        checkForActiveRide();
-      }
-      return () => {};
-    }, [usuario])
-  );
-
-  useEffect(() => {
-    const initialize = async () => {
-      try { await initLocation(); } finally { setIsInitializing(false); }
-    };
-    initialize();
-    return () => { if (locationWatcherRef.current) locationWatcherRef.current.remove(); };
-  }, []);
-
-  useEffect(() => {
-    let watcher: any = null;
-    const startWatching = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      watcher = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
-        (loc) => {
-          if (step === 'idle' || step === 'selecting_dest') {
-            setOriginCoord({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          }
-        }
-      );
-      locationWatcherRef.current = watcher;
-    };
-    startWatching();
-    return () => { if (watcher) watcher.remove(); };
-  }, [step]);
-
-  useEffect(() => {
-    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        if ((step === 'in_progress' || step === 'accepted' || step === 'searching') && currentRideId) {
-          await pollRideDataOnResume();
-        }
-      }
-      appState.current = nextAppState;
-    };
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, [step, currentRideId]);
 
   const fetchDriverRouteToPickup = async (driverPos: { latitude: number; longitude: number }) => {
     if (!originCoord) return;
@@ -903,223 +598,133 @@ export default function PassengerHome() {
         setDriverToPickupDuration(leg.duration.text);
         setDriverRouteCoords(decodePolyline(json.routes[0].overview_polyline.points));
       }
-    } catch (e) {
-      console.error('Erro ao buscar rota do motorista:', e);
-    }
+    } catch (e) { console.error('Erro ao buscar rota do motorista:', e); }
   };
 
-  const checkForActiveRide = async () => {
+  const fetchRoute = async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }, fitCamera = true) => {
+    setLoadingRoute(true);
     try {
-      if (!usuario) return;
-      const { data: passenger } = await supabase.from('passageiros').select('id').eq('usuario_id', usuario.id).single();
-      if (!passenger) return;
-
-      const { data: activeRide } = await supabase
-        .from('corridas')
-        .select(`*, motoristas!inner(id, avaliacao_media, usuarios:usuario_id(nome_completo, telefone))`)
-        .eq('passageiro_id', passenger.id)
-        .in('status', ['solicitada', 'aceita', 'iniciada'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (!activeRide) return;
-
-      setCurrentRideId(activeRide.id);
-      setOriginCoord({ latitude: activeRide.origem_latitude, longitude: activeRide.origem_longitude });
-      setOriginAddress(activeRide.origem_endereco);
-      setDestCoord({ latitude: activeRide.destino_latitude, longitude: activeRide.destino_longitude });
-      setDestAddress(activeRide.destino_endereco);
-      setDistance(activeRide.distancia_km ? `${activeRide.distancia_km.toFixed(1)} km` : null);
-      setDuration(activeRide.duracao_estimada ? `${activeRide.duracao_estimada} min` : null);
-      setPrice(activeRide.valor_estimado);
-
-      const newStep = mapStatusToStep(activeRide.status);
-      setStep(newStep);
-
-      if (activeRide.motoristas) {
-        setDriverId(activeRide.motoristas.id);
-        setDriverName(activeRide.motoristas.usuarios?.nome_completo || 'Motorista');
-        setDriverPhone(activeRide.motoristas.usuarios?.telefone || '');
-        setDriverRating(activeRide.motoristas.avaliacao_media || 5);
-        await fetchDriverVehicleInfo(activeRide.motoristas.id);
+      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&language=pt-BR&key=${GOOGLE_API_KEY}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.status === 'OK' && json.routes.length > 0) {
+        const leg = json.routes[0].legs[0];
+        const distKm = leg.distance.value / 1000;
+        setDistance(leg.distance.text); setDuration(leg.duration.text);
+        setPrice(Math.max(MINIMUM_FARE, distKm * PRICE_PER_KM));
+        setRouteCoords(decodePolyline(json.routes[0].overview_polyline.points));
+        if (fitCamera) mapRef.current?.fitToCoordinates([origin, dest], { edgePadding: { top: 80, right: 60, bottom: 340, left: 60 }, animated: true });
+      } else {
+        const distKm = calculateDistance(origin, dest);
+        setDistance(`${distKm.toFixed(1)} km`); setDuration(`${Math.round((distKm / SPEED_KMH) * 60)} min`);
+        setPrice(Math.max(MINIMUM_FARE, distKm * PRICE_PER_KM));
+        setRouteCoords([origin, dest]);
+        if (fitCamera) mapRef.current?.fitToCoordinates([origin, dest], { edgePadding: { top: 80, right: 60, bottom: 340, left: 60 }, animated: true });
       }
-
-      if (activeRide.motorista_latitude && activeRide.motorista_longitude) {
-        const driverPos = { latitude: activeRide.motorista_latitude, longitude: activeRide.motorista_longitude };
-        setDriverCoord(driverPos);
-        if (activeRide.status === 'aceita') await fetchDriverRouteToPickup(driverPos);
-      }
-
-      if (activeRide.origem_latitude && activeRide.destino_latitude) {
-        await fetchRoute(
-          { latitude: activeRide.origem_latitude, longitude: activeRide.origem_longitude },
-          { latitude: activeRide.destino_latitude, longitude: activeRide.destino_longitude },
-          false
-        );
-      }
-
-      if (activeRide.status === 'aceita' && activeRide.motorista_latitude) {
-        setTimeout(() => centerOnDriverAndPickup(), 800);
-      }
-    } catch (err) {
-      console.error('Erro ao verificar corrida ativa:', err);
-    }
+    } catch (e) { Alert.alert('Erro', 'Não foi possível calcular a rota.'); }
+    finally { setLoadingRoute(false); }
   };
 
-  const calculateDistance = (c1: { latitude: number; longitude: number }, c2: { latitude: number; longitude: number }): number => {
-    const R = 6371;
-    const dLat = ((c2.latitude - c1.latitude) * Math.PI) / 180;
-    const dLon = ((c2.longitude - c1.longitude) * Math.PI) / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos((c1.latitude * Math.PI) / 180) * Math.cos((c2.latitude * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const animateCard = (show: boolean) => {
+    Animated.spring(cardAnim, { toValue: show ? 1 : 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
   };
-
-  const pollRideDataOnResume = async () => {
-    if (!currentRideId) return;
-    try {
-      const { data: ride } = await supabase
-        .from('corridas')
-        .select(`status, motorista_latitude, motorista_longitude, motoristas!inner(id, avaliacao_media, usuarios:usuario_id(nome_completo, telefone))`)
-        .eq('id', currentRideId)
-        .single();
-
-      if (!ride) return;
-
-      const newStep = mapStatusToStep(ride.status);
-      setStep(newStep);
-
-      if (ride.motorista_latitude && ride.motorista_longitude) {
-        setDriverCoord({ latitude: ride.motorista_latitude, longitude: ride.motorista_longitude });
-        if (ride.status === 'aceita') fetchDriverRouteToPickup({ latitude: ride.motorista_latitude, longitude: ride.motorista_longitude });
-      }
-
-      if (ride.motoristas) {
-        setDriverId(ride.motoristas.id);
-        setDriverName(ride.motoristas.usuarios?.nome_completo || 'Motorista');
-        setDriverRating(ride.motoristas.avaliacao_media || 5);
-        await fetchDriverVehicleInfo(ride.motoristas.id);
-      }
-
-      if (ride.status === 'finalizada') {
-        handleRideCompleted();
-      } else if (ride.status === 'cancelada') {
-        resetRide();
-        Alert.alert('Corrida cancelada', 'Sua corrida foi cancelada.');
-      }
-    } catch (err) {
-      console.error('Erro no poll ao resumir:', err);
-    }
-  };
-
-  useEffect(() => {
-    if (step === 'searching') {
-      const loop = Animated.loop(Animated.timing(searchAnim, { toValue: 1, duration: 1200, useNativeDriver: true }));
-      loop.start();
-      return () => loop.stop();
-    } else {
-      searchAnim.setValue(0);
-    }
-  }, [step]);
-
-  useEffect(() => {
-    if (step === 'in_progress' && currentRideId) {
-      rideTimerRef.current = setInterval(() => setElapsedSeconds((prev) => prev + 1), 1000);
-      return () => clearInterval(rideTimerRef.current);
-    }
-  }, [step, currentRideId]);
-
-  useEffect(() => {
-    const isActive = step === 'searching' || step === 'accepted' || step === 'in_progress';
-    if (!isActive || !currentRideId) return;
-
-    const pollRide = async () => {
-      try {
-        const { data: ride, error } = await supabase
-          .from('corridas')
-          .select(`status, motorista_latitude, motorista_longitude, motoristas!inner(id, avaliacao_media, usuarios:usuario_id(nome_completo, telefone))`)
-          .eq('id', currentRideId)
-          .single();
-
-        if (error || !ride) return;
-
-        const newStep = mapStatusToStep(ride.status);
-
-        if (newStep !== step && ride.status !== 'cancelada' && ride.status !== 'finalizada') {
-          setStep(newStep);
-
-          if (ride.status === 'aceita') {
-            if (ride.motoristas) {
-              setDriverId(ride.motoristas.id);
-              setDriverName(ride.motoristas.usuarios?.nome_completo || 'Motorista');
-              setDriverPhone(ride.motoristas.usuarios?.telefone || '');
-              setDriverRating(ride.motoristas.avaliacao_media || 5);
-              await fetchDriverVehicleInfo(ride.motoristas.id);
-            }
-            if (ride.motorista_latitude && ride.motorista_longitude) {
-              const pos = { latitude: ride.motorista_latitude, longitude: ride.motorista_longitude };
-              setDriverCoord(pos);
-              await fetchDriverRouteToPickup(pos);
-              setTimeout(() => centerOnDriverAndPickup(), 500);
-            }
-          }
-
-          if (ride.status === 'iniciada') {
-            setDriverRouteCoords([]);
-            setDriverToPickupDistance(null);
-            setDriverToPickupDuration(null);
-            setElapsedSeconds(0);
-            if (originCoord && destCoord) {
-              mapRef.current?.fitToCoordinates([originCoord, destCoord], {
-                edgePadding: { top: 80, right: 60, bottom: 300, left: 60 },
-                animated: true,
-              });
-            }
-          }
-        }
-
-        if (ride.motorista_latitude && ride.motorista_longitude) {
-          const newPos = { latitude: ride.motorista_latitude, longitude: ride.motorista_longitude };
-          if (driverMarkerRef.current) driverMarkerRef.current.animateMarkerToCoordinate(newPos, 1000);
-          setDriverCoord(newPos);
-
-          if (ride.status === 'aceita') {
-            if (driverPreviousCoord) {
-              if (calculateDistance(driverPreviousCoord, newPos) > 0.05) {
-                await fetchDriverRouteToPickup(newPos);
-                setDriverPreviousCoord(newPos);
-              }
-            } else {
-              await fetchDriverRouteToPickup(newPos);
-              setDriverPreviousCoord(newPos);
-            }
-          }
-        }
-
-        if (ride.status === 'finalizada') {
-          handleRideCompleted();
-        }
-
-        if (ride.status === 'cancelada') {
-          resetRide();
-          Alert.alert('Corrida cancelada', 'O motorista cancelou a corrida.');
-        }
-      } catch (err) {
-        console.error('Erro no poll:', err);
-      }
-    };
-
-    pollRideRef.current = setInterval(pollRide, 1500);
-    return () => clearInterval(pollRideRef.current);
-  }, [step, currentRideId, driverPreviousCoord, originCoord, destCoord]);
 
   const handleRideCompleted = () => {
-    clearInterval(rideTimerRef.current);
-    clearInterval(pollRideRef.current);
-    setStep('completed');
-    setCompletedRideId(currentRideId);
-    setCompletedDriverName(driverName);
+    clearInterval(rideTimerRef.current); clearInterval(pollRideRef.current);
+    setStep('completed'); setCompletedRideId(currentRideId); setCompletedDriverName(driverName);
     setShowRatingModal(true);
+  };
+
+  const resetRide = () => {
+    setDestCoord(null); setDestAddress(''); setRouteCoords([]); setDriverRouteCoords([]);
+    setDistance(null); setDuration(null); setPrice(null); setStep('idle');
+    animateCard(false); destAutocompleteRef.current?.clear(); setManualSelectTarget(null);
+    setDriverCoord(null); setDriverName(''); setDriverPhone(''); setElapsedSeconds(0);
+    setCurrentRideId(null); setCurrentRideCreatedAt(null);
+    setDriverToPickupDistance(null); setDriverToPickupDuration(null);
+    setDriverId(null);
+    setDriverCarModel(''); setDriverCarColor(''); setDriverTotalRides(0);
+    setShowDriverCurrentRide(false);
+    setReservedRouteDriverToDropoff([]); setReservedRouteDropoffToOrigin([]); setReservedDropoffCoord(null);
+    clearInterval(rideTimerRef.current); clearInterval(pollRideRef.current);
+    if (originCoord) mapRef.current?.animateToRegion({ ...originCoord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
+  };
+
+  const performCancellation = async (withPenalty: boolean) => {
+    if (currentRideId) {
+      try {
+        const updateData: any = { status: 'cancelada', cancelado_por: 'passageiro', updated_at: new Date().toISOString() };
+        if (withPenalty) updateData.multa_cancelamento = CANCELLATION_PENALTY_AMOUNT;
+        await supabase.from('corridas').update(updateData).eq('id', currentRideId);
+      } catch (err) { console.warn('Erro ao cancelar:', err); }
+    }
+    resetRide();
+    if (withPenalty) Alert.alert('Corrida cancelada', `Multa de R$ ${CANCELLATION_PENALTY_AMOUNT.toFixed(2)} será cobrada na sua próxima corrida.`);
+  };
+
+  const handleCancelRide = async () => {
+    if (step === 'in_progress') { Alert.alert('Cancelamento indisponível', 'Não é possível cancelar a corrida após o início da viagem.'); return; }
+    if ((step === 'searching' || step === 'accepted' || step === 'reservada') && currentRideId) {
+      Alert.alert('Cancelar', step === 'searching' ? 'Cancelar busca por motorista?' : 'Cancelar corrida?', [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Sim, cancelar', onPress: () => performCancellation(false), style: 'destructive' },
+      ]);
+      return;
+    }
+    resetRide();
+  };
+
+  // ── Verificação de foto antes de confirmar corrida ──
+  const handleConfirmRide = async () => {
+    if (!originCoord || !destCoord || !distance || !duration || !price) {
+      Alert.alert('Erro', 'Preencha origem e destino.');
+      return;
+    }
+
+    // Bloqueia se não tiver foto de perfil
+    if (hasFotoProfile === false) {
+      setShowNoPhotoModal(true);
+      return;
+    }
+
+    // Se ainda estiver carregando, faz a verificação direto no banco para garantir
+    if (hasFotoProfile === null || loadingFoto) {
+      try {
+        await refetchFoto();
+        if (hasFotoProfile === false) {
+          setShowNoPhotoModal(true);
+          return;
+        }
+      } catch {
+        // em caso de erro na verificação, prossegue normalmente
+      }
+    }
+
+    setStep('searching');
+    try {
+      const { data: passenger } = await supabase.from('passageiros').select('id').eq('usuario_id', usuario.id).single();
+      if (!passenger) { Alert.alert('Erro', 'Perfil não encontrado.'); setStep('confirming'); return; }
+      const distanciaNum = parseFloat(distance.replace(',', '.').match(/[\d,.]+/)?.[0] || '0');
+      const duracaoNum = parseInt(duration.match(/\d+/)?.[0] || '0', 10);
+      const { data: motoristaDisponivel } = await supabase.from('motoristas').select('id').eq('status', 'disponivel').eq('online', true).limit(1).single();
+      let statusCorrida = 'solicitada';
+      let motoristaId = motoristaDisponivel?.id || null;
+      if (!motoristaId) {
+        const { data: motoristaOcupado } = await supabase.from('motoristas').select('id').eq('status', 'em_corrida').eq('online', true).limit(1).single();
+        if (motoristaOcupado) { motoristaId = motoristaOcupado.id; statusCorrida = 'reservada'; }
+      }
+      const { data: corrida, error } = await supabase.from('corridas').insert({
+        passageiro_id: passenger.id, motorista_id: motoristaId,
+        origem_endereco: originAddress, origem_latitude: originCoord.latitude, origem_longitude: originCoord.longitude,
+        destino_endereco: destAddress, destino_latitude: destCoord.latitude, destino_longitude: destCoord.longitude,
+        distancia_km: distanciaNum, duracao_estimada: duracaoNum, valor_estimado: price,
+        status: statusCorrida, data_solicitacao: new Date().toISOString(), metodo_pagamento: selectedPayment,
+      }).select('id, created_at').single();
+      if (error || !corrida) { Alert.alert('Erro', 'Falha ao solicitar.'); setStep('confirming'); return; }
+      setCurrentRideId(corrida.id);
+      setCurrentRideCreatedAt(corrida.created_at);
+      if (statusCorrida === 'reservada' && motoristaId) { setStep('reservada'); setShowDriverCurrentRide(true); }
+    } catch (err) { Alert.alert('Erro', 'Erro inesperado.'); setStep('confirming'); }
   };
 
   const initLocation = async () => {
@@ -1137,65 +742,11 @@ export default function PassengerHome() {
         const res = await Location.reverseGeocodeAsync(coord);
         if (res.length > 0) {
           const addr = [res[0].street, res[0].streetNumber, res[0].district].filter(Boolean).join(', ') || 'Localização atual';
-          setOriginAddress(addr);
-          originAutocompleteRef.current?.setAddressText(addr);
+          setOriginAddress(addr); originAutocompleteRef.current?.setAddressText(addr);
         }
-      } catch {
-        setOriginAddress('Localização atual');
-        originAutocompleteRef.current?.setAddressText('Localização atual');
-      }
-    } catch (err) {
-      Alert.alert('Erro', 'Não foi possível obter sua localização.');
-    } finally {
-      setLoadingLocation(false);
-    }
-  };
-
-  const centerOnUser = async () => {
-    if (!originCoord) { await initLocation(); return; }
-    mapRef.current?.animateToRegion({ ...originCoord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
-  };
-
-  const centerOnDriverAndPickup = () => {
-    if (driverCoord && originCoord) {
-      mapRef.current?.fitToCoordinates([driverCoord, originCoord], {
-        edgePadding: { top: 100, right: 60, bottom: 300, left: 60 },
-        animated: true,
-      });
-    }
-  };
-
-  const fetchRoute = async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }, fitCamera = true) => {
-    setLoadingRoute(true);
-    try {
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&language=pt-BR&key=${GOOGLE_API_KEY}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      if (json.status === 'OK' && json.routes.length > 0) {
-        const leg = json.routes[0].legs[0];
-        const distKm = leg.distance.value / 1000;
-        setDistance(leg.distance.text);
-        setDuration(leg.duration.text);
-        setPrice(Math.max(MINIMUM_FARE, distKm * PRICE_PER_KM));
-        setRouteCoords(decodePolyline(json.routes[0].overview_polyline.points));
-        if (fitCamera) {
-          mapRef.current?.fitToCoordinates([origin, dest], { edgePadding: { top: 80, right: 60, bottom: 340, left: 60 }, animated: true });
-        }
-      } else {
-        const distKm = calculateDistance(origin, dest);
-        setDistance(`${distKm.toFixed(1)} km`);
-        setDuration(`${Math.round((distKm / SPEED_KMH) * 60)} min`);
-        setPrice(Math.max(MINIMUM_FARE, distKm * PRICE_PER_KM));
-        setRouteCoords([origin, dest]);
-        if (fitCamera) {
-          mapRef.current?.fitToCoordinates([origin, dest], { edgePadding: { top: 80, right: 60, bottom: 340, left: 60 }, animated: true });
-        }
-      }
-    } catch (e) {
-      Alert.alert('Erro', 'Não foi possível calcular a rota.');
-    } finally {
-      setLoadingRoute(false);
-    }
+      } catch { setOriginAddress('Localização atual'); originAutocompleteRef.current?.setAddressText('Localização atual'); }
+    } catch (err) { Alert.alert('Erro', 'Não foi possível obter sua localização.'); }
+    finally { setLoadingLocation(false); }
   };
 
   const handleSelectOrigin = (data: any, details: any = null) => {
@@ -1203,8 +754,7 @@ export default function PassengerHome() {
     const coord = { latitude: details.geometry.location.lat, longitude: details.geometry.location.lng };
     setOriginCoord(coord);
     const streetName = data.description.split(',')[0].trim();
-    setOriginAddress(streetName);
-    originAutocompleteRef.current?.setAddressText(streetName);
+    setOriginAddress(streetName); originAutocompleteRef.current?.setAddressText(streetName);
     mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
     if (destCoord) fetchRoute(coord, destCoord);
   };
@@ -1214,16 +764,36 @@ export default function PassengerHome() {
     const coord = { latitude: details.geometry.location.lat, longitude: details.geometry.location.lng };
     setDestCoord(coord);
     const streetName = data.description.split(',')[0].trim();
-    setDestAddress(streetName);
-    destAutocompleteRef.current?.setAddressText(streetName);
-    setStep('confirming');
-    animateCard(true);
+    setDestAddress(streetName); destAutocompleteRef.current?.setAddressText(streetName);
+    setStep('confirming'); animateCard(true);
     if (originCoord) fetchRoute(originCoord, coord);
   };
 
-  const handleManualSelect = (target: ManualSelectTarget) => {
-    setManualSelectTarget(target);
-    Alert.alert('Toque no mapa', target === 'origin' ? 'Toque no local de embarque desejado.' : 'Toque no local de destino desejado.');
+  const handleOpenMapPicker = (target: 'origin' | 'dest') => {
+    setMapPickerTarget(target);
+    setShowMapPicker(true);
+  };
+
+  const handleMapPickerConfirm = (
+    coord: { latitude: number; longitude: number },
+    address: string
+  ) => {
+    setShowMapPicker(false);
+    if (mapPickerTarget === 'origin') {
+      setOriginCoord(coord);
+      setOriginAddress(address);
+      originAutocompleteRef.current?.setAddressText(address);
+      mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
+      if (destCoord) fetchRoute(coord, destCoord);
+    } else {
+      setDestCoord(coord);
+      setDestAddress(address);
+      destAutocompleteRef.current?.setAddressText(address);
+      setStep('confirming');
+      animateCard(true);
+      if (originCoord) fetchRoute(originCoord, coord);
+    }
+    setMapPickerTarget(null);
   };
 
   const onMapPress = async (e: any) => {
@@ -1235,113 +805,174 @@ export default function PassengerHome() {
       if (results.length > 0) addr = [results[0].street, results[0].streetNumber, results[0].district].filter(Boolean).join(', ') || addr;
     } catch {}
     if (manualSelectTarget === 'origin') {
-      setOriginCoord(coordinate);
-      setOriginAddress(addr);
-      originAutocompleteRef.current?.setAddressText(addr);
+      setOriginCoord(coordinate); setOriginAddress(addr); originAutocompleteRef.current?.setAddressText(addr);
       mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
       if (destCoord) fetchRoute(coordinate, destCoord);
     } else {
-      setDestCoord(coordinate);
-      setDestAddress(addr);
-      destAutocompleteRef.current?.setAddressText(addr);
-      setStep('confirming');
-      animateCard(true);
+      setDestCoord(coordinate); setDestAddress(addr); destAutocompleteRef.current?.setAddressText(addr);
+      setStep('confirming'); animateCard(true);
       if (originCoord) fetchRoute(originCoord, coordinate);
     }
     setManualSelectTarget(null);
   };
 
-  const animateCard = (show: boolean) => {
-    Animated.spring(cardAnim, { toValue: show ? 1 : 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+  const handleOpenChat = () => { if (currentRideId && usuario) setShowChat(true); };
+
+  const handleShareRide = async () => {
+    if (!driverName || !currentRideId) return;
+    const trackingLink = driverCoord ? `https://www.google.com/maps?q=${driverCoord.latitude},${driverCoord.longitude}` : '';
+    const message = `🚗 *Corrida em andamento*\n\n👤 Motorista: ${driverName}\n⭐ Avaliação: ${driverRating.toFixed(1)}\n\n📍 Embarque: ${originAddress}\n🎯 Destino: ${destAddress}\n\n📏 Distância: ${distance || 'Calculando...'}\n⏱ Tempo estimado: ${duration || 'Calculando...'}\n\n${trackingLink ? `🔍 Rastrear:\n${trackingLink}\n\n` : ''}_Localização atualizada automaticamente_`;
+    try { await Share.share({ message, title: 'Minha corrida' }); } catch (error) { console.error('Erro ao compartilhar:', error); }
+    setShowAlertModal(false);
   };
 
-  const handleCancelRide = async () => {
-    if (step === 'in_progress') {
-      Alert.alert('Cancelamento indisponível', 'Não é possível cancelar a corrida após o início da viagem.');
-      return;
-    }
-
-    if ((step === 'searching' || step === 'accepted') && currentRideId) {
-      Alert.alert(
-        'Cancelar',
-        step === 'searching' ? 'Cancelar busca por motorista?' : 'Cancelar corrida? O motorista já está a caminho.',
-        [
-          { text: 'Não', style: 'cancel' },
-          { text: 'Sim, cancelar', onPress: () => performCancellation(false), style: 'destructive' },
-        ]
-      );
-      return;
-    }
-
-    resetRide();
-  };
-
-  const performCancellation = async (withPenalty: boolean) => {
-    if (currentRideId) {
-      try {
-        const updateData: any = {
-          status: 'cancelada',
-          updated_at: new Date().toISOString()
-        };
-
-        if (withPenalty) {
-          updateData.multa_cancelamento = CANCELLATION_PENALTY_AMOUNT;
+  const handleReportDriver = () => {
+    setShowAlertModal(false);
+    Alert.alert('Denunciar Motorista', 'Deseja realmente denunciar este motorista?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Denunciar', style: 'destructive', onPress: async () => {
+        if (currentRideId) {
+          try { await supabase.from('corridas').update({ denuncia_motorista: true, updated_at: new Date().toISOString() }).eq('id', currentRideId); Alert.alert('Denúncia enviada', 'Sua denúncia foi registrada.'); }
+          catch (err) { Alert.alert('Erro', 'Não foi possível registrar a denúncia.'); }
         }
+      }}
+    ]);
+  };
 
-        await supabase.from('corridas').update(updateData).eq('id', currentRideId);
-      } catch (err) {
-        console.warn('Erro ao cancelar:', err);
+  const handleCallPolice = () => { setShowAlertModal(false); Alert.alert('Ligar para Polícia (190)', 'Deseja realmente ligar?', [{ text: 'Cancelar', style: 'cancel' }, { text: 'Ligar 190', style: 'destructive', onPress: () => Linking.openURL('tel:190') }]); };
+  const handleCallSAMU = () => { setShowAlertModal(false); Alert.alert('Ligar para SAMU (192)', 'Deseja realmente ligar?', [{ text: 'Cancelar', style: 'cancel' }, { text: 'Ligar 192', style: 'destructive', onPress: () => Linking.openURL('tel:192') }]); };
+  const handleViewDriverProfile = () => { if (driverId) setShowDriverProfile(true); };
+
+  const handleBlockDriver = async (reason: string) => {
+    setShowDriverProfile(false);
+    if (usuario && driverId) {
+      try {
+        const { data: passenger } = await supabase.from('passageiros').select('id').eq('usuario_id', usuario.id).single();
+        if (passenger) {
+          await supabase.from('motoristas_bloqueados').insert({ passageiro_id: passenger.id, motorista_id: driverId, created_at: new Date().toISOString() });
+          Alert.alert('Motorista bloqueado', `Motorista bloqueado por: ${reason}.`);
+        }
+      } catch (err) { Alert.alert('Erro', 'Não foi possível bloquear o motorista.'); }
+    }
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => setIsNight(isNightTime()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if ((step === 'accepted' || step === 'in_progress') && driverCoord) {
+      const pulse = Animated.loop(Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.3, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ]));
+      pulse.start();
+      return () => pulse.stop();
+    } else { pulseAnim.setValue(1); }
+  }, [step, driverCoord]);
+
+  useEffect(() => {
+    if (step === 'searching') {
+      const loop = Animated.loop(Animated.timing(searchAnim, { toValue: 1, duration: 1200, useNativeDriver: true }));
+      loop.start();
+      return () => loop.stop();
+    } else { searchAnim.setValue(0); }
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 'in_progress' && currentRideId) {
+      rideTimerRef.current = setInterval(() => setElapsedSeconds(prev => prev + 1), 1000);
+      return () => clearInterval(rideTimerRef.current);
+    }
+  }, [step, currentRideId]);
+
+  useEffect(() => {
+    if (loadingCorrida) return;
+    if (corridaAtiva) {
+      setCurrentRideId(corridaAtiva.id);
+      setCurrentRideCreatedAt(corridaAtiva.created_at || corridaAtiva.data_solicitacao || null);
+      setOriginCoord({ latitude: corridaAtiva.origem_latitude, longitude: corridaAtiva.origem_longitude });
+      setOriginAddress(corridaAtiva.origem_endereco);
+      if (corridaAtiva.destino_latitude) { setDestCoord({ latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }); setDestAddress(corridaAtiva.destino_endereco); }
+      setDistance(corridaAtiva.distancia_km ? `${corridaAtiva.distancia_km.toFixed(1)} km` : null);
+      setDuration(corridaAtiva.duracao_estimada ? `${corridaAtiva.duracao_estimada} min` : null);
+      setPrice(corridaAtiva.valor_estimado);
+      if (corridaAtiva.motoristas) {
+        setDriverId(corridaAtiva.motoristas.id);
+        setDriverName(corridaAtiva.motoristas.usuarios?.nome_completo || 'Motorista');
+        setDriverPhone(corridaAtiva.motoristas.usuarios?.telefone || '');
+        setDriverRating(corridaAtiva.motoristas.avaliacao_media || 5);
+        fetchDriverVehicleInfo(corridaAtiva.motoristas.id);
+      }
+      if (corridaAtiva.motorista_latitude && corridaAtiva.motorista_longitude) {
+        setDriverCoord({ latitude: corridaAtiva.motorista_latitude, longitude: corridaAtiva.motorista_longitude });
+      }
+      const newStep = mapStatusToStep(corridaAtiva.status);
+      setStep(newStep);
+      if (corridaAtiva.status === 'reservada') setShowDriverCurrentRide(true);
+      if (corridaAtiva.origem_latitude && corridaAtiva.destino_latitude) {
+        fetchRoute({ latitude: corridaAtiva.origem_latitude, longitude: corridaAtiva.origem_longitude }, { latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }, false);
       }
     }
+  }, [corridaAtiva, loadingCorrida]);
 
-    resetRide();
+  useEffect(() => {
+    const initialize = async () => { try { await initLocation(); } finally { setIsInitializing(false); } };
+    initialize();
+    return () => { if (locationWatcherRef.current) locationWatcherRef.current.remove(); };
+  }, []);
 
-    if (withPenalty) {
-      Alert.alert(
-        'Corrida cancelada',
-        `Multa de R$ ${CANCELLATION_PENALTY_AMOUNT.toFixed(2)} será cobrada na sua próxima corrida.`
+  useEffect(() => {
+    let watcher: any = null;
+    const startWatching = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      watcher = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+        (loc) => { if (step === 'idle' || step === 'selecting_dest') setOriginCoord({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }); }
       );
-    }
-  };
+      locationWatcherRef.current = watcher;
+    };
+    startWatching();
+    return () => { if (watcher) watcher.remove(); };
+  }, [step]);
 
-  const resetRide = () => {
-    setDestCoord(null); setDestAddress(''); setRouteCoords([]); setDriverRouteCoords([]);
-    setDistance(null); setDuration(null); setPrice(null); setStep('idle');
-    animateCard(false); destAutocompleteRef.current?.clear(); setManualSelectTarget(null);
-    setDriverCoord(null); setDriverName(''); setDriverPhone(''); setElapsedSeconds(0);
-    setCurrentRideId(null); setDriverToPickupDistance(null); setDriverToPickupDuration(null);
-    setDriverPreviousCoord(null); setDriverId(null);
-    setDriverCarModel(''); setDriverCarColor(''); setDriverTotalRides(0);
-    clearInterval(rideTimerRef.current); clearInterval(pollRideRef.current); clearInterval(locationUpdateRef.current);
-    if (originCoord) mapRef.current?.animateToRegion({ ...originCoord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
-  };
-
-  const handleConfirmRide = async () => {
-    if (!originCoord || !destCoord || !distance || !duration || !price) { Alert.alert('Erro', 'Preencha origem e destino.'); return; }
-    setStep('searching');
-    try {
-      const { data: passenger } = await supabase.from('passageiros').select('id').eq('usuario_id', usuario.id).single();
-      if (!passenger) { Alert.alert('Erro', 'Perfil não encontrado.'); setStep('confirming'); return; }
-      const distanciaNum = parseFloat(distance.replace(',', '.').match(/[\d,.]+/)?.[0] || '0');
-      const duracaoNum = parseInt(duration.match(/\d+/)?.[0] || '0', 10);
-      const { data: corrida, error } = await supabase.from('corridas').insert({
-        passageiro_id: passenger.id,
-        origem_endereco: originAddress, origem_latitude: originCoord.latitude, origem_longitude: originCoord.longitude,
-        destino_endereco: destAddress, destino_latitude: destCoord.latitude, destino_longitude: destCoord.longitude,
-        distancia_km: distanciaNum, duracao_estimada: duracaoNum, valor_estimado: price,
-        status: 'solicitada', data_solicitacao: new Date().toISOString(),
-        metodo_pagamento: selectedPayment,
-      }).select('id').single();
-      if (error || !corrida) { Alert.alert('Erro', 'Falha ao solicitar.'); setStep('confirming'); return; }
-      setCurrentRideId(corrida.id);
-    } catch (err) { Alert.alert('Erro', 'Erro inesperado.'); setStep('confirming'); }
-  };
-
-  const handleOpenChat = () => {
-    if (currentRideId && usuario) {
-      setShowChat(true);
-    }
-  };
+  useEffect(() => {
+    const isActive = step === 'searching' || step === 'accepted' || step === 'in_progress' || step === 'reservada';
+    if (!isActive || !currentRideId) return;
+    const pollRide = async () => {
+      try {
+        const { data: ride } = await supabase
+          .from('corridas')
+          .select(`status, motorista_latitude, motorista_longitude, motoristas!inner(id, avaliacao_media, usuarios:usuario_id(nome_completo, telefone))`)
+          .eq('id', currentRideId).single();
+        if (!ride) return;
+        const newStep = mapStatusToStep(ride.status);
+        if (newStep !== step && ride.status !== 'cancelada' && ride.status !== 'finalizada') {
+          setStep(newStep);
+          if (newStep === 'accepted' && ride.motoristas) {
+            setDriverId(ride.motoristas.id); setDriverName(ride.motoristas.usuarios?.nome_completo || 'Motorista');
+            setDriverRating(ride.motoristas.avaliacao_media || 5); fetchDriverVehicleInfo(ride.motoristas.id);
+          }
+          if (newStep === 'reservada') setShowDriverCurrentRide(true);
+          if (newStep === 'accepted' && ride.motorista_latitude && ride.motorista_longitude) {
+            await fetchDriverRouteToPickup({ latitude: ride.motorista_latitude, longitude: ride.motorista_longitude });
+            setShowDriverCurrentRide(false);
+          }
+          if (newStep === 'in_progress') {
+            setShowDriverCurrentRide(false); setDriverRouteCoords([]);
+            setDriverToPickupDistance(null); setDriverToPickupDuration(null);
+            setReservedRouteDriverToDropoff([]); setReservedRouteDropoffToOrigin([]); setReservedDropoffCoord(null);
+          }
+        }
+        if (ride.status === 'finalizada') handleRideCompleted();
+        if (ride.status === 'cancelada') { resetRide(); Alert.alert('Corrida cancelada', 'Sua corrida foi cancelada.'); }
+      } catch (err) { console.error('Erro no poll:', err); }
+    };
+    pollRideRef.current = setInterval(pollRide, 3000);
+    return () => clearInterval(pollRideRef.current);
+  }, [step, currentRideId]);
 
   const cardTranslateY = cardAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] });
   const spin = searchAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
@@ -1353,25 +984,16 @@ export default function PassengerHome() {
     </TouchableOpacity>
   );
 
+  const handleManualSelect = (target: ManualSelectTarget) => {
+    setManualSelectTarget(target);
+    Alert.alert('Toque no mapa', target === 'origin' ? 'Toque no local de embarque desejado.' : 'Toque no local de destino desejado.');
+  };
+
   const isSearching = step === 'searching';
   const isAccepted = step === 'accepted';
   const isInProgress = step === 'in_progress';
-  const hideTopBar = isSearching || isAccepted || isInProgress;
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  if (isInitializing) {
-    return (
-      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#1E40AF" />
-        <Text style={{ marginTop: 12, color: '#6B7280' }}>Carregando...</Text>
-      </View>
-    );
-  }
+  const isReservada = step === 'reservada';
+  const hideTopBar = isSearching || isAccepted || isInProgress || isReservada;
 
   const renderDriverCard = (showDistanceInfo: boolean) => (
     <TouchableOpacity style={styles.driverCard} onPress={handleViewDriverProfile} activeOpacity={0.7}>
@@ -1382,76 +1004,86 @@ export default function PassengerHome() {
           <View style={styles.driverRatingWrap}>
             <Star size={12} color="#FBBF24" fill="#FBBF24" />
             <Text style={styles.driverRating}>{driverRating.toFixed(1)}</Text>
-            {driverTotalRides > 0 && (
-              <Text style={styles.driverRidesCount}>• {driverTotalRides} corridas</Text>
-            )}
+            {driverTotalRides > 0 && <Text style={styles.driverRidesCount}>• {driverTotalRides} corridas</Text>}
           </View>
         </View>
         <View style={styles.driverActions}>
-          <TouchableOpacity style={styles.chatBtn} onPress={handleOpenChat}>
-            <MessageCircle size={20} color="#1E40AF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.alertBtn} onPress={() => setShowAlertModal(true)}>
-            <AlertTriangle size={20} color="#DC2626" />
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.chatBtn} onPress={handleOpenChat}><MessageCircle size={20} color="#1E40AF" /></TouchableOpacity>
+          <TouchableOpacity style={styles.alertBtn} onPress={() => setShowAlertModal(true)}><AlertTriangle size={20} color="#DC2626" /></TouchableOpacity>
         </View>
       </View>
-
       {(driverCarModel || driverCarColor) && (
         <View style={styles.driverVehicleRow}>
           <Car size={13} color="#6B7280" />
-          <Text style={styles.driverVehicleText}>
-            {[driverCarModel, driverCarColor].filter(Boolean).join(' • ')}
-          </Text>
+          <Text style={styles.driverVehicleText}>{[driverCarModel, driverCarColor].filter(Boolean).join(' • ')}</Text>
         </View>
       )}
-
       {showDistanceInfo && driverToPickupDistance && (
         <View style={styles.driverDistanceInfo}>
           <Navigation size={13} color="#10B981" />
-          <Text style={styles.driverDistanceText}>
-            A {driverToPickupDistance} de você • {driverToPickupDuration}
-          </Text>
+          <Text style={styles.driverDistanceText}>A {driverToPickupDistance} de você • {driverToPickupDuration}</Text>
         </View>
       )}
-
       <Text style={styles.viewMoreText}>Toque para ver perfil completo →</Text>
     </TouchableOpacity>
   );
 
+  if (isInitializing) {
+    return (
+      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#1E40AF" />
+        <Text style={{ marginTop: 12, color: '#6B7280' }}>Carregando...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
+      {/* ── Modais ── */}
       <RatingModal visible={showRatingModal} rideId={completedRideId || ''} driverName={completedDriverName} price={price} distance={distance} usuarioId={usuario?.id || ''} onClose={() => { setShowRatingModal(false); resetRide(); }} />
+      <ChatModal visible={showChat} corridaId={currentRideId || ''} usuarioId={usuario?.id || ''} driverName={driverName} onClose={() => setShowChat(false)} />
+      <AlertModal visible={showAlertModal} driverName={driverName} originAddress={originAddress} destAddress={destAddress} driverCoord={driverCoord} onClose={() => setShowAlertModal(false)} onShareRide={handleShareRide} onReportDriver={handleReportDriver} onCallPolice={handleCallPolice} onCallSAMU={handleCallSAMU} />
+      <DriverProfileModal visible={showDriverProfile} driverId={driverId} driverName={driverName} driverRating={driverRating} onClose={() => setShowDriverProfile(false)} onBlockDriver={handleBlockDriver} />
 
-      <ChatModal
-        visible={showChat}
-        corridaId={currentRideId || ''}
-        usuarioId={usuario?.id || ''}
-        driverName={driverName}
-        onClose={() => setShowChat(false)}
+      {/* ── Modal: sem foto de perfil ── */}
+      <NoProfilePhotoModal
+        visible={showNoPhotoModal}
+        onClose={() => setShowNoPhotoModal(false)}
+        onGoToProfile={() => {
+          setShowNoPhotoModal(false);
+          router.push('/(tabs)/profile');
+        }}
       />
 
-      <AlertModal
-        visible={showAlertModal}
-        driverName={driverName}
-        originAddress={originAddress}
-        destAddress={destAddress}
-        driverCoord={driverCoord}
-        onClose={() => setShowAlertModal(false)}
-        onShareRide={handleShareRide}
-        onReportDriver={handleReportDriver}
-        onCallPolice={handleCallPolice}
-        onCallSAMU={handleCallSAMU}
+      {/* ── MapPickerModal ── */}
+      <MapPickerModal
+        visible={showMapPicker}
+        initialCoord={mapPickerTarget === 'origin' ? originCoord : destCoord}
+        target={mapPickerTarget}
+        onConfirm={handleMapPickerConfirm}
+        onClose={() => {
+          setShowMapPicker(false);
+          setMapPickerTarget(null);
+        }}
       />
 
-      <DriverProfileModal
-        visible={showDriverProfile}
-        driverId={driverId}
-        driverName={driverName}
-        driverRating={driverRating}
-        onClose={() => setShowDriverProfile(false)}
-        onBlockDriver={handleBlockDriver}
-      />
+      {showDriverCurrentRide && driverId && (
+        <View style={styles.driverCurrentRideContainer}>
+          <DriverCurrentRideCard
+            motoristaId={driverId}
+            corridaReservadaId={currentRideId}
+            corridaReservadaCriadaEm={currentRideCreatedAt}
+            myOriginCoord={originCoord}
+            onPress={handleViewDriverProfile}
+            onCancel={performCancellation}
+            onRouteUpdate={(routes) => {
+              setReservedRouteDriverToDropoff(routes.driverToDropoff);
+              setReservedRouteDropoffToOrigin(routes.dropoffToOrigin);
+              setReservedDropoffCoord(routes.dropoffCoord);
+            }}
+          />
+        </View>
+      )}
 
       <MapView
         ref={mapRef}
@@ -1467,7 +1099,6 @@ export default function PassengerHome() {
         showsIndoors={false}
         showsBuildings={false}
         showsScale={false}
-        mapType={isNight ? 'standard' : 'standard'}
         customMapStyle={isNight ? mapNightStyle : []}
         onPress={step === 'confirming' || step === 'idle' ? onMapPress : undefined}
       >
@@ -1481,23 +1112,33 @@ export default function PassengerHome() {
             <View style={styles.markerDestWrap}><View style={styles.markerDestRed}><MapPin size={16} color="#FFF" fill="#FFF" /></View><View style={styles.markerPinRed} /></View>
           </Marker>
         )}
-        {isAccepted && driverRouteCoords.length > 1 && (
+
+        {isReservada && reservedRouteDriverToDropoff.length > 1 && (
           <>
-            <Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} />
-            <Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} />
+            <Polyline coordinates={reservedRouteDriverToDropoff} strokeColor="#F97316" strokeWidth={5} lineDashPattern={[6, 3]} />
+            <Polyline coordinates={reservedRouteDriverToDropoff} strokeColor="#FED7AA" strokeWidth={2} />
           </>
+        )}
+        {isReservada && reservedRouteDropoffToOrigin.length > 1 && (
+          <>
+            <Polyline coordinates={reservedRouteDropoffToOrigin} strokeColor="#8B5CF6" strokeWidth={5} lineDashPattern={[6, 3]} />
+            <Polyline coordinates={reservedRouteDropoffToOrigin} strokeColor="#DDD6FE" strokeWidth={2} />
+          </>
+        )}
+        {isReservada && reservedDropoffCoord && (
+          <Marker coordinate={reservedDropoffCoord} anchor={{ x: 0.5, y: 0.5 }} title="Desembarque passageiro atual">
+            <View style={styles.markerDropoff}><MapPin size={14} color="#FFF" /></View>
+          </Marker>
+        )}
+
+        {isAccepted && driverRouteCoords.length > 1 && (
+          <><Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} /><Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} /></>
         )}
         {isInProgress && routeCoords.length > 1 && (
-          <>
-            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} />
-            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} />
-          </>
+          <><Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} /><Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} /></>
         )}
         {!hideTopBar && routeCoords.length > 1 && (
-          <>
-            <Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} />
-            <Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} />
-          </>
+          <><Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} /><Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} /></>
         )}
         {(isAccepted || isInProgress) && driverCoord && (
           <Marker ref={driverMarkerRef} coordinate={driverCoord} anchor={{ x: 0.5, y: 0.5 }} zIndex={999} title={driverName}>
@@ -1508,29 +1149,99 @@ export default function PassengerHome() {
         )}
       </MapView>
 
+      {/* ── Topbar com campos de origem/destino + botões de pin ── */}
       {!hideTopBar && (
         <SafeAreaView style={styles.overlay} edges={['top']}>
+          {/* Banner de aviso: sem foto de perfil */}
+          {hasFotoProfile === false && (
+            <TouchableOpacity
+              style={styles.noPhotoBanner}
+              onPress={() => setShowNoPhotoModal(true)}
+              activeOpacity={0.85}
+            >
+              <Camera size={16} color="#92400E" />
+              <Text style={styles.noPhotoBannerText}>
+                Adicione uma foto de perfil para solicitar corridas
+              </Text>
+              <Text style={styles.noPhotoBannerCta}>Adicionar →</Text>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.topBar}>
             <View style={styles.fieldRow}>
               <View style={styles.dotGreen} />
               <View style={styles.autocompleteWrap}>
-                <GooglePlacesAutocomplete ref={originAutocompleteRef} placeholder="Local de embarque" onPress={handleSelectOrigin} fetchDetails debounce={300} minLength={2} nearbyPlacesAPI="GooglePlacesSearch" listViewDisplayed="auto" enablePoweredByContainer={false} query={{ key: GOOGLE_API_KEY, language: 'pt-BR', components: 'country:br', location: `${SANTA_RITA_COORDS.latitude},${SANTA_RITA_COORDS.longitude}`, radius: 10000 }} styles={{ textInput: styles.fieldInput, container: { flex: 1 }, listView: styles.suggestionList, row: styles.suggestionRow, description: styles.suggestionText, separator: { height: 1, backgroundColor: '#F3F4F6' } }} textInputProps={{ placeholderTextColor: '#9CA3AF', returnKeyType: 'search', clearButtonMode: 'while-editing', autoCorrect: false, autoCapitalize: 'words' }} keyboardShouldPersistTaps="handled" renderLeftButton={() => null} renderRightButton={() => originAddress ? (<TouchableOpacity onPress={async () => { setOriginAddress(''); originAutocompleteRef.current?.clear(); await initLocation(); }} style={styles.clearBtn}><Crosshair size={16} color="#1E40AF" /></TouchableOpacity>) : null} flatListProps={{ keyboardShouldPersistTaps: 'handled', ListFooterComponent: manualFooter('origin') }} />
+                <GooglePlacesAutocomplete
+                  ref={originAutocompleteRef}
+                  placeholder="Local de embarque"
+                  onPress={handleSelectOrigin}
+                  fetchDetails
+                  debounce={300}
+                  minLength={2}
+                  nearbyPlacesAPI="GooglePlacesSearch"
+                  listViewDisplayed="auto"
+                  enablePoweredByContainer={false}
+                  query={{ key: GOOGLE_API_KEY, language: 'pt-BR', components: 'country:br', location: `${SANTA_RITA_COORDS.latitude},${SANTA_RITA_COORDS.longitude}`, radius: 10000 }}
+                  styles={{ textInput: styles.fieldInput, container: { flex: 1 }, listView: styles.suggestionList, row: styles.suggestionRow, description: styles.suggestionText, separator: { height: 1, backgroundColor: '#F3F4F6' } }}
+                  textInputProps={{ placeholderTextColor: '#9CA3AF', returnKeyType: 'search', clearButtonMode: 'while-editing', autoCorrect: false, autoCapitalize: 'words' }}
+                  keyboardShouldPersistTaps="handled"
+                  flatListProps={{ keyboardShouldPersistTaps: 'handled', ListFooterComponent: manualFooter('origin') }}
+                />
               </View>
+              <TouchableOpacity
+                style={styles.pinBtn}
+                onPress={() => handleOpenMapPicker('origin')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MapPin size={20} color="#10B981" fill="#10B981" />
+              </TouchableOpacity>
             </View>
+
             <View style={styles.searchDivider}><View style={styles.dottedLine} /></View>
+
             <View style={styles.fieldRow}>
               <View style={styles.dotRed} />
               <View style={styles.autocompleteWrap}>
-                <GooglePlacesAutocomplete ref={destAutocompleteRef} placeholder="Para onde vamos?" onPress={handleSelectDestination} fetchDetails debounce={300} minLength={2} nearbyPlacesAPI="GooglePlacesSearch" listViewDisplayed="auto" enablePoweredByContainer={false} query={{ key: GOOGLE_API_KEY, language: 'pt-BR', components: 'country:br', location: `${SANTA_RITA_COORDS.latitude},${SANTA_RITA_COORDS.longitude}`, radius: 10000 }} styles={{ textInput: styles.fieldInput, container: { flex: 1 }, listView: styles.suggestionList, row: styles.suggestionRow, description: styles.suggestionText, separator: { height: 1, backgroundColor: '#F3F4F6' } }} textInputProps={{ placeholderTextColor: '#9CA3AF', returnKeyType: 'search', clearButtonMode: 'while-editing', autoCorrect: false, autoCapitalize: 'words' }} keyboardShouldPersistTaps="handled" renderLeftButton={() => null} renderRightButton={() => destAddress ? (<TouchableOpacity onPress={() => { setDestAddress(''); setDestCoord(null); destAutocompleteRef.current?.clear(); }} style={styles.clearBtn}><X size={16} color="#6B7280" /></TouchableOpacity>) : null} flatListProps={{ keyboardShouldPersistTaps: 'handled', ListFooterComponent: manualFooter('dest') }} />
+                <GooglePlacesAutocomplete
+                  ref={destAutocompleteRef}
+                  placeholder="Para onde vamos?"
+                  onPress={handleSelectDestination}
+                  fetchDetails
+                  debounce={300}
+                  minLength={2}
+                  nearbyPlacesAPI="GooglePlacesSearch"
+                  listViewDisplayed="auto"
+                  enablePoweredByContainer={false}
+                  query={{ key: GOOGLE_API_KEY, language: 'pt-BR', components: 'country:br', location: `${SANTA_RITA_COORDS.latitude},${SANTA_RITA_COORDS.longitude}`, radius: 10000 }}
+                  styles={{ textInput: styles.fieldInput, container: { flex: 1 }, listView: styles.suggestionList, row: styles.suggestionRow, description: styles.suggestionText, separator: { height: 1, backgroundColor: '#F3F4F6' } }}
+                  textInputProps={{ placeholderTextColor: '#9CA3AF', returnKeyType: 'search', clearButtonMode: 'while-editing', autoCorrect: false, autoCapitalize: 'words' }}
+                  keyboardShouldPersistTaps="handled"
+                  flatListProps={{ keyboardShouldPersistTaps: 'handled', ListFooterComponent: manualFooter('dest') }}
+                />
               </View>
+              <TouchableOpacity
+                style={styles.pinBtn}
+                onPress={() => handleOpenMapPicker('dest')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <MapPin size={20} color="#EF4444" fill="#EF4444" />
+              </TouchableOpacity>
             </View>
           </View>
-          <TouchableOpacity style={styles.fabCenter} onPress={centerOnUser}><Crosshair size={22} color="#1E40AF" /></TouchableOpacity>
         </SafeAreaView>
       )}
 
+      {/* ── Card de confirmação (botão Confirmar corrida) ── */}
       {!hideTopBar && (
-        <Animated.View style={[styles.bottomCard, { transform: [{ translateY: cardTranslateY }] }]}>
+        <Animated.View
+          style={[
+            styles.bottomCard,
+            {
+              transform: [{ translateY: cardTranslateY }],
+              paddingBottom: insets.bottom || 24,
+            },
+          ]}
+        >
           <View style={styles.cardHandle} />
           <View style={styles.routeSummary}>
             <View style={styles.routePoint}><View style={styles.routeDotGreen} /><View style={styles.routeInfo}><Text style={styles.routePointLabel}>EMBARQUE</Text><Text style={styles.routePointAddr} numberOfLines={1}>{originAddress || '—'}</Text></View></View>
@@ -1547,73 +1258,84 @@ export default function PassengerHome() {
             </View>
           )}
           <View style={styles.paymentRow}>
-            {PAYMENT_OPTIONS.map(({ id, label, Icon }) => (
-              <TouchableOpacity key={id} style={[styles.payOpt, selectedPayment === id && styles.payOptActive]} onPress={() => setSelectedPayment(id)}>
-                <Icon size={18} color={selectedPayment === id ? '#FFF' : '#6B7280'} /><Text style={[styles.payLabel, selectedPayment === id && styles.payLabelActive]}>{label}</Text>
-              </TouchableOpacity>
-            ))}
+            {PAYMENT_OPTIONS.map(({ id, label, Icon }) => (<TouchableOpacity key={id} style={[styles.payOpt, selectedPayment === id && styles.payOptActive]} onPress={() => setSelectedPayment(id)}><Icon size={18} color={selectedPayment === id ? '#FFF' : '#6B7280'} /><Text style={[styles.payLabel, selectedPayment === id && styles.payLabelActive]}>{label}</Text></TouchableOpacity>))}
           </View>
           <View style={styles.actionsRow}>
             <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelRide}><X size={20} color="#6B7280" /></TouchableOpacity>
-            <TouchableOpacity style={[styles.confirmBtn, loadingRoute && { opacity: 0.75 }]} onPress={handleConfirmRide} disabled={loadingRoute}><Check size={20} color="#FFF" /><Text style={styles.confirmBtnText}>Confirmar corrida</Text></TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.confirmBtn,
+                (loadingRoute || hasFotoProfile === false) && { opacity: 0.75 },
+              ]}
+              onPress={handleConfirmRide}
+              disabled={loadingRoute}
+            >
+              {hasFotoProfile === false
+                ? <><Camera size={20} color="#FFF" /><Text style={styles.confirmBtnText}>Adicionar foto para continuar</Text></>
+                : <><Check size={20} color="#FFF" /><Text style={styles.confirmBtnText}>Confirmar corrida</Text></>
+              }
+            </TouchableOpacity>
           </View>
         </Animated.View>
       )}
 
+      {/* ── Card de busca (procurando motorista) ── */}
       {isSearching && (
         <SafeAreaView style={styles.searchingOverlay} edges={['bottom']}>
-          <View style={styles.searchingCard}>
+          <View style={[styles.searchingCard, { paddingBottom: insets.bottom || 24 }]}>
             <View style={styles.cardHandle} />
             <View style={styles.searchingInner}>
               <Animated.View style={{ transform: [{ rotate: spin }] }}><MapPin size={40} color="#1E40AF" /></Animated.View>
               <Text style={styles.searchingTitle}>Procurando motorista</Text>
               <Text style={styles.searchingSubtitle}>Aguardando um motorista próximo aceitar sua corrida...</Text>
-              <TouchableOpacity style={styles.viewDetailsBtn} onPress={() => router.push(`/corrida/${currentRideId}`)}><MapIcon size={18} color="#1E40AF" /><Text style={styles.viewDetailsText}>Ver detalhes da corrida</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.cancelSearchBtn} onPress={handleCancelRide}><X size={20} color="#6B7280" /><Text style={styles.cancelSearchText}>Cancelar busca</Text></TouchableOpacity>
+              <View style={styles.searchStatsRow}>
+                <View style={styles.searchStatItem}>
+                  <Text style={styles.searchStatValue}>{distance ?? '—'}</Text>
+                  <Text style={styles.searchStatLabel}>Distância</Text>
+                </View>
+                <View style={styles.searchStatDivider} />
+                <View style={styles.searchStatItem}>
+                  <Text style={styles.searchStatValue}>{duration ?? '—'}</Text>
+                  <Text style={styles.searchStatLabel}>Tempo est.</Text>
+                </View>
+                <View style={styles.searchStatDivider} />
+                <View style={styles.searchStatItem}>
+                  <Text style={[styles.searchStatValue, { color: '#1E40AF' }]}>
+                    {price ? `R$ ${price.toFixed(2)}` : '—'}
+                  </Text>
+                  <Text style={styles.searchStatLabel}>Valor est.</Text>
+                </View>
+              </View>
+              <TouchableOpacity style={styles.cancelSearchBtn} onPress={handleCancelRide}>
+                <X size={20} color="#6B7280" />
+                <Text style={styles.cancelSearchText}>Cancelar busca</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </SafeAreaView>
       )}
 
+      {/* ── Card de motorista a caminho ── */}
       {isAccepted && (
         <SafeAreaView style={styles.inProgressOverlay} edges={['bottom', 'top']}>
           {renderDriverCard(true)}
-          <View style={styles.inProgressCard}>
+          <View style={[styles.inProgressCard, { paddingBottom: insets.bottom || 24 }]}>
             <View style={styles.cardHandle} />
-            <View style={styles.phaseStatus}>
-              <View style={styles.phaseContent}>
-                <User size={16} color="#10B981" />
-                <Text style={[styles.phaseText, { color: '#10B981' }]}>Motorista está indo até você</Text>
-              </View>
-            </View>
-            {driverToPickupDuration && (
-              <View style={styles.etaContainer}>
-                <Clock size={16} color="#6B7280" />
-                <Text style={styles.etaText}>Chegada estimada: {driverToPickupDuration}</Text>
-              </View>
-            )}
-            <TouchableOpacity style={styles.cancelInProgressBtn} onPress={handleCancelRide}>
-              <X size={18} color="#FFF" />
-              <Text style={styles.cancelInProgressText}>Cancelar corrida</Text>
-            </TouchableOpacity>
+            <View style={styles.phaseStatus}><View style={styles.phaseContent}><User size={16} color="#10B981" /><Text style={[styles.phaseText, { color: '#10B981' }]}>Motorista está indo até você</Text></View></View>
+            {driverToPickupDuration && (<View style={styles.etaContainer}><Clock size={16} color="#6B7280" /><Text style={styles.etaText}>Chegada estimada: {driverToPickupDuration}</Text></View>)}
+            <TouchableOpacity style={styles.cancelInProgressBtn} onPress={handleCancelRide}><X size={18} color="#FFF" /><Text style={styles.cancelInProgressText}>Cancelar corrida</Text></TouchableOpacity>
           </View>
         </SafeAreaView>
       )}
 
+      {/* ── Card de em viagem ── */}
       {isInProgress && (
         <SafeAreaView style={styles.inProgressOverlay} edges={['bottom', 'top']}>
           {renderDriverCard(false)}
-          <View style={styles.inProgressCard}>
+          <View style={[styles.inProgressCard, { paddingBottom: insets.bottom || 24 }]}>
             <View style={styles.cardHandle} />
-            <View style={styles.phaseStatus}>
-              <View style={styles.phaseContent}>
-                <Car size={16} color="#1E40AF" />
-                <Text style={styles.phaseText}>Em viagem para o destino</Text>
-              </View>
-            </View>
-            <View style={styles.noCancelWarning}>
-              <Text style={styles.noCancelText}>Cancelamento não disponível após o início da viagem</Text>
-            </View>
+            <View style={styles.phaseStatus}><View style={styles.phaseContent}><Car size={16} color="#1E40AF" /><Text style={styles.phaseText}>Em viagem para o destino</Text></View></View>
+            <View style={styles.noCancelWarning}><Text style={styles.noCancelText}>Cancelamento não disponível após o início da viagem</Text></View>
           </View>
         </SafeAreaView>
       )}
@@ -1642,6 +1364,89 @@ const mapNightStyle = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
   { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#17263c' }] },
 ];
+
+// ── Estilos do NoProfilePhotoModal ──
+const noPhotoStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 28,
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  iconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#BFDBFE',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  description: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  bold: {
+    fontWeight: '700',
+    color: '#1E40AF',
+  },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#1E3A5F',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    width: '100%',
+    marginBottom: 10,
+  },
+  primaryBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  secondaryBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F6',
+    width: '100%',
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+});
 
 const driverProfileStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -1727,7 +1532,44 @@ const ratingStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#E5E7EB' },
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-  topBar: { marginHorizontal: 16, marginTop: 12, backgroundColor: '#FFFFFF', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
+  // ── Banner sem foto ──
+  noPhotoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 6,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  noPhotoBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  noPhotoBannerCta: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  topBar: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
   fieldRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36 },
   dotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#D1FAE5' },
   dotRed: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#EF4444', borderWidth: 2, borderColor: '#FEE2E2' },
@@ -1735,22 +1577,46 @@ const styles = StyleSheet.create({
   fieldInput: { fontSize: 15, color: '#111827', fontWeight: '500', paddingVertical: 0, paddingHorizontal: 0, backgroundColor: 'transparent', height: 36 },
   searchDivider: { paddingLeft: 14, marginVertical: 6 },
   dottedLine: { width: 1.5, height: 16, backgroundColor: '#E5E7EB', marginLeft: 3 },
-  clearBtn: { padding: 6 },
+  pinBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F9FAFB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
   suggestionList: { position: 'absolute', top: 52, left: -16, right: -16, backgroundColor: '#FFF', borderRadius: 16, marginHorizontal: -16, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 20, elevation: 10, zIndex: 999 },
   suggestionRow: { paddingHorizontal: 16, paddingVertical: 14 },
   suggestionText: { fontSize: 14, color: '#374151' },
   manualOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderTopWidth: 1, borderColor: '#F3F4F6' },
   manualOptionText: { fontSize: 14, fontWeight: '600', color: '#1E40AF' },
-  fabCenter: { position: 'absolute', right: 16, top: 130, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5 },
   markerOriginGreen: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#FFF', shadowColor: '#10B981', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
   markerOriginInnerGreen: { alignItems: 'center', justifyContent: 'center' },
   markerDestWrap: { alignItems: 'center' },
   markerDestRed: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', shadowColor: '#EF4444', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
   markerPinRed: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', marginTop: -2 },
+  markerDropoff: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F97316', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFF', elevation: 5 },
   markerDriverPulse: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(59, 130, 246, 0.2)', alignItems: 'center', justifyContent: 'center' },
   markerDriver: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#FFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
   markerDriverInner: { alignItems: 'center', justifyContent: 'center' },
-  bottomCard: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 20 },
+  bottomCard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
+    elevation: 20,
+  },
   cardHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 16 },
   routeSummary: { marginBottom: 16, backgroundColor: '#F9FAFB', borderRadius: 16, padding: 14, gap: 4 },
   routePoint: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -1779,12 +1645,26 @@ const styles = StyleSheet.create({
   confirmBtn: { flex: 1, height: 52, backgroundColor: '#1E3A5F', borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   confirmBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
   searchingOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20 },
-  searchingCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 20 },
+  searchingCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
+    elevation: 20,
+  },
   searchingInner: { alignItems: 'center', justifyContent: 'center', paddingVertical: 24, gap: 16 },
   searchingTitle: { fontSize: 20, fontWeight: '700', color: '#1E3A5F', marginTop: 8 },
   searchingSubtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginHorizontal: 24 },
-  viewDetailsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
-  viewDetailsText: { fontSize: 14, fontWeight: '600', color: '#1E40AF' },
+  searchStatsRow: { flexDirection: 'row', backgroundColor: '#F9FAFB', borderRadius: 16, paddingVertical: 12, paddingHorizontal: 8, marginTop: 4, marginBottom: 8, width: '100%' },
+  searchStatItem: { flex: 1, alignItems: 'center' },
+  searchStatDivider: { width: 1, backgroundColor: '#E5E7EB' },
+  searchStatValue: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  searchStatLabel: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
   cancelSearchBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, backgroundColor: '#F3F4F6' },
   cancelSearchText: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
   inProgressOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', zIndex: 25, pointerEvents: 'box-none' },
@@ -1804,7 +1684,18 @@ const styles = StyleSheet.create({
   driverDistanceInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   driverDistanceText: { fontSize: 13, color: '#10B981', fontWeight: '600' },
   viewMoreText: { fontSize: 11, color: '#9CA3AF', textAlign: 'right', marginTop: 6 },
-  inProgressCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12, shadowColor: '#000', shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 20 },
+  inProgressCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
+    elevation: 20,
+  },
   phaseStatus: { backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 12, borderWidth: 1, borderColor: '#BFDBFE' },
   phaseContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   phaseText: { fontSize: 12, fontWeight: '600', color: '#1E40AF' },
@@ -1814,4 +1705,5 @@ const styles = StyleSheet.create({
   cancelInProgressText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
   noCancelWarning: { alignItems: 'center', justifyContent: 'center', paddingVertical: 14, backgroundColor: '#FEF2F2', borderRadius: 14, borderWidth: 1, borderColor: '#FEE2E2' },
   noCancelText: { fontSize: 14, fontWeight: '600', color: '#DC2626' },
+  driverCurrentRideContainer: { position: 'absolute', top: Platform.OS === 'ios' ? 50 : 10, left: 0, right: 0, zIndex: 30 },
 });
