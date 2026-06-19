@@ -16,6 +16,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff } from 'lucide-react-native';
 
+const COLORS = {
+  background: '#0A0A0A',
+  surface: '#1A1A1A',
+  surfaceLight: '#2A2A2A',
+  gold: '#FFD700',
+  goldDark: '#D4A800',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#B0B0B0',
+  textMuted: '#6B6B6B',
+  border: '#333333',
+  danger: '#FF4444',
+};
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,7 +53,6 @@ export default function Login() {
     }
   };
 
-  // Função para navegar para a tela de esqueceu a senha
   const handleForgotPassword = () => {
     router.push('/(auth)/ForgotPassword');
   };
@@ -72,7 +84,7 @@ export default function Login() {
                 value={email}
                 onChangeText={setEmail}
                 placeholder="exemplo@email.com"
-                placeholderTextColor="#999"
+                placeholderTextColor={COLORS.textMuted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
@@ -87,7 +99,7 @@ export default function Login() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Digite sua senha"
-                  placeholderTextColor="#999"
+                  placeholderTextColor={COLORS.textMuted}
                   secureTextEntry={!showPassword}
                   autoComplete="password"
                 />
@@ -96,9 +108,9 @@ export default function Login() {
                   onPress={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (
-                    <EyeOff size={20} color="#999" />
+                    <EyeOff size={20} color={COLORS.textMuted} />
                   ) : (
-                    <Eye size={20} color="#999" />
+                    <Eye size={20} color={COLORS.textMuted} />
                   )}
                 </TouchableOpacity>
               </View>
@@ -110,13 +122,12 @@ export default function Login() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#000" />
               ) : (
                 <Text style={styles.loginButtonText}>Entrar</Text>
               )}
             </TouchableOpacity>
 
-            {/* Botão Esqueceu a senha - AGORA COM NAVEGAÇÃO */}
             <TouchableOpacity 
               style={styles.forgotPassword}
               onPress={handleForgotPassword}
@@ -140,7 +151,7 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: COLORS.background,
   },
   keyboardView: {
     flex: 1,
@@ -164,13 +175,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#FF6600',
+    color: COLORS.gold,
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#CCC',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: 48,
   },
@@ -183,58 +194,58 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#FF6600',
+    color: COLORS.gold,
     marginBottom: 8,
     marginLeft: 4,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 18,
     fontSize: 16,
-    backgroundColor: '#1A1A1A',
-    color: '#FFF',
+    backgroundColor: COLORS.surface,
+    color: COLORS.textPrimary,
   },
   passwordContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
     borderRadius: 16,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.surface,
   },
   passwordInput: {
     flex: 1,
     paddingVertical: 14,
     paddingHorizontal: 18,
     fontSize: 16,
-    color: '#FFF',
+    color: COLORS.textPrimary,
   },
   eyeButton: {
     paddingHorizontal: 16,
   },
   loginButton: {
-    backgroundColor: '#FF6600',
+    backgroundColor: COLORS.gold,
     paddingVertical: 16,
     borderRadius: 30,
     alignItems: 'center',
     marginTop: 16,
-    shadowColor: '#FF6600',
+    shadowColor: COLORS.gold,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 5,
   },
   disabledButton: {
-    backgroundColor: '#B87333',
-    opacity: 0.7,
+    backgroundColor: COLORS.textMuted,
+    opacity: 0.6,
   },
   loginButtonText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#000',
   },
   forgotPassword: {
     alignItems: 'center',
@@ -242,7 +253,7 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     fontSize: 14,
-    color: '#FF6600',
+    color: COLORS.gold,
     textDecorationLine: 'underline',
   },
   footer: {
@@ -254,11 +265,11 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: '#AAA',
+    color: COLORS.textSecondary,
   },
   footerLink: {
     fontSize: 14,
-    color: '#FF6600',
+    color: COLORS.gold,
     fontWeight: 'bold',
   },
 });

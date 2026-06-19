@@ -13,6 +13,9 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// 🔥 URL DA SUA EDGE FUNCTION NO SUPABASE
+const API_URL = 'https://tvzcvyvfhsslxggqwtny.supabase.co/functions/v1';
+
 export default function ForgotPassword() {
   const [step, setStep] = useState<'phone' | 'code' | 'newPassword'>('phone');
   const [phone, setPhone] = useState('');
@@ -20,14 +23,11 @@ export default function ForgotPassword() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('');
 
-  // Função para gerar código aleatório de 6 dígitos
-  const generateRandomCode = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
+  // 🔥 REMOVA: const [generatedCode, setGeneratedCode] = useState('');
+  // 🔥 REMOVA: const generateRandomCode = () => { ... }
 
-  // Simula envio de SMS para o celular
+  // 🔥 ENVIA CÓDIGO PARA O BACKEND (EDGE FUNCTION)
   const handleSendCode = async () => {
     if (!phone || phone.length < 10) {
       Alert.alert('Erro', 'Digite um número de celular válido (com DDD).');
@@ -35,40 +35,70 @@ export default function ForgotPassword() {
     }
 
     setLoading(true);
+
     try {
-      // Aqui você chamaria sua API para enviar o SMS real
-      const randomCode = generateRandomCode();
-      setGeneratedCode(randomCode);
-      
-      // Simula envio de SMS (em produção, isso seria feito pelo backend)
-      console.log(`Código enviado para ${phone}: ${randomCode}`);
-      Alert.alert('Código enviado', `Enviamos um código para ${phone} (simulação: ${randomCode})`);
-      
+      const response = await fetch(`${API_URL}/send-reset-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          telefone: phone,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao enviar código');
+      }
+
+      Alert.alert('Sucesso', 'Código enviado para seu celular.');
       setStep('code');
     } catch (error: any) {
-      Alert.alert('Erro', 'Não foi possível enviar o código. Tente novamente.');
+      Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Verifica se o código digitado está correto
-  const handleVerifyCode = () => {
+  // 🔥 VERIFICA CÓDIGO NO BACKEND
+  const handleVerifyCode = async () => {
     if (!code) {
       Alert.alert('Erro', 'Digite o código recebido.');
       return;
     }
 
-    if (code !== generatedCode) {
-      Alert.alert('Erro', 'Código inválido. Tente novamente.');
-      return;
-    }
+    setLoading(true);
 
-    Alert.alert('Código verificado', 'Agora você pode criar uma nova senha.');
-    setStep('newPassword');
+    try {
+      const response = await fetch(`${API_URL}/verify-reset-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          telefone: phone,
+          code: code,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Código inválido');
+      }
+
+      Alert.alert('Sucesso', 'Código verificado! Agora crie uma nova senha.');
+      setStep('newPassword');
+    } catch (error: any) {
+      Alert.alert('Erro', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Troca a senha
+  // 🔥 ALTERA SENHA NO BACKEND
   const handleChangePassword = async () => {
     if (!newPassword || !confirmPassword) {
       Alert.alert('Erro', 'Preencha todos os campos.');
@@ -86,24 +116,62 @@ export default function ForgotPassword() {
     }
 
     setLoading(true);
+
     try {
-      // Aqui você chamaria sua API para atualizar a senha do usuário
-      console.log(`Nova senha para ${phone}: ${newPassword}`);
-      Alert.alert('Sucesso', 'Senha alterada com sucesso! Faça login com sua nova senha.');
+      const response = await fetch(`${API_URL}/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          telefone: phone,
+          code: code,
+          password: newPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao alterar senha');
+      }
+
+      Alert.alert('Sucesso', 'Senha alterada com sucesso!');
       router.replace('/(auth)/login');
     } catch (error: any) {
-      Alert.alert('Erro', 'Não foi possível alterar a senha. Tente novamente.');
+      Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Reenviar código
-  const handleResendCode = () => {
-    const newCode = generateRandomCode();
-    setGeneratedCode(newCode);
-    console.log(`Novo código enviado: ${newCode}`);
-    Alert.alert('Código reenviado', `Novo código: ${newCode} (simulação)`);
+  // 🔥 REENVIA CÓDIGO
+  const handleResendCode = async () => {
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/send-reset-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          telefone: phone,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao reenviar código');
+      }
+
+      Alert.alert('Sucesso', 'Novo código enviado para seu celular.');
+    } catch (error: any) {
+      Alert.alert('Erro', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -156,10 +224,18 @@ export default function ForgotPassword() {
                 keyboardType="number-pad"
                 maxLength={6}
               />
-              <TouchableOpacity style={styles.button} onPress={handleVerifyCode}>
-                <Text style={styles.buttonText}>Verificar código</Text>
+              <TouchableOpacity
+                style={[styles.button, loading && styles.disabledButton]}
+                onPress={handleVerifyCode}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.buttonText}>Verificar código</Text>
+                )}
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleResendCode}>
+              <TouchableOpacity onPress={handleResendCode} disabled={loading}>
                 <Text style={styles.resendText}>Reenviar código</Text>
               </TouchableOpacity>
             </View>

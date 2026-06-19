@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUsuario = async (userId: string) => {
     try {
+      console.log('🔍 Buscando dados do usuário:', userId);
       const { data: userData, error: userError } = await supabase
         .from('usuarios')
         .select('*')
@@ -95,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
+      console.log('📱 Sessão atual após reset:', !!currentSession);
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
 
@@ -103,31 +105,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setUsuario(null);
         setLoading(false);
+        console.log('⚠️ Nenhuma sessão encontrada após reset');
       }
       console.log('✅ Reset concluído.');
     } catch (error) {
       console.error('❌ Erro ao resetar auth:', error);
+      setSession(null);
+      setUser(null);
+      setUsuario(null);
       setLoading(false);
     }
   };
 
+  // Efeito para inicializar e monitorar autenticação
   useEffect(() => {
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
 
     const initializeAuth = async () => {
       try {
+        // Timeout de segurança para não ficar carregando indefinidamente
         timeoutId = setTimeout(() => {
           if (isMounted && loading) {
             console.warn('⚠️ Auth timeout – forçando loading false');
             setLoading(false);
           }
-        }, 5000);
+        }, 8000); // Aumentado para 8 segundos
 
         console.log('🚀 Inicializando AuthContext...');
 
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        
         if (!isMounted) return;
+
+        if (sessionError) {
+          console.error('❌ Erro ao obter sessão inicial:', sessionError.message);
+          
+          // Tenta novamente em caso de erro de rede
+          if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`🔄 Tentativa ${retryCount} de ${MAX_RETRIES}...`);
+            setTimeout(initializeAuth, 1000 * retryCount); // Delay progressivo
+            return;
+          }
+          
+          setLoading(false);
+          return;
+        }
 
         console.log('📱 Sessão inicial:', !!initialSession);
         setSession(initialSession);
@@ -140,24 +166,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error) {
         console.error('❌ Erro ao inicializar auth:', error);
+        
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          console.log(`🔄 Tentativa ${retryCount} de ${MAX_RETRIES} após erro...`);
+          setTimeout(initializeAuth, 1000 * retryCount);
+          return;
+        }
+        
         if (isMounted) setLoading(false);
       } finally {
-        if (timeoutId) clearTimeout(timeoutId);
+        if (timeoutId && retryCount >= MAX_RETRIES) {
+          clearTimeout(timeoutId);
+        }
       }
     };
 
     initializeAuth();
 
+    // Listener para mudanças de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event, newSession) => {
         if (!isMounted) return;
 
-        console.log('🔄 Mudança de autenticação:', event, !!session);
-        setSession(session);
-        setUser(session?.user ?? null);
+        console.log('🔄 Auth state change:', event, 'Session:', !!newSession);
+        
+        // Trata diferentes eventos de autenticação
+        switch (event) {
+          case 'SIGNED_IN':
+            console.log('✅ Usuário logado');
+            break;
+          case 'SIGNED_OUT':
+            console.log('👋 Usuário deslogado');
+            setSession(null);
+            setUser(null);
+            setUsuario(null);
+            setLoading(false);
+            return;
+          case 'TOKEN_REFRESHED':
+            console.log('🔑 Token renovado automaticamente');
+            break;
+          case 'USER_UPDATED':
+            console.log('👤 Dados do usuário atualizados');
+            break;
+          case 'PASSWORD_RECOVERY':
+            console.log('🔐 Recuperação de senha');
+            break;
+          default:
+            console.log('ℹ️ Evento:', event);
+        }
+        
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
 
-        if (session?.user) {
-          await fetchUsuario(session.user.id);
+        if (newSession?.user) {
+          await fetchUsuario(newSession.user.id);
         } else {
           setUsuario(null);
           setLoading(false);
@@ -173,27 +236,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    console.log('🔑 Tentando login...');
+    const { data, error } = await supabase.auth.signInWithPassword({ 
+      email, 
+      password 
+    });
+    
+    if (error) {
+      console.error('❌ Erro no login:', error.message);
+      throw error;
+    }
+    
+    console.log('✅ Login realizado com sucesso!');
+    return data;
   };
 
   const signUp = async (email: string, password: string, userData: any) => {
-    const { error } = await supabase.auth.signUp({
+    console.log('📝 Tentando cadastro...');
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: userData,
       },
     });
-    if (error) throw error;
+    
+    if (error) {
+      console.error('❌ Erro no cadastro:', error.message);
+      throw error;
+    }
+    
+    console.log('✅ Cadastro realizado com sucesso!');
+    return data;
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setSession(null);
-    setUser(null);
-    setUsuario(null);
+    console.log('👋 Realizando logout...');
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('❌ Erro no logout:', error.message);
+        throw error;
+      }
+      console.log('✅ Logout realizado com sucesso!');
+    } catch (error) {
+      console.error('❌ Erro crítico no logout:', error);
+    } finally {
+      // Sempre limpa o estado local, mesmo se o logout remoto falhar
+      setSession(null);
+      setUser(null);
+      setUsuario(null);
+      setLoading(false);
+    }
   };
 
   const value = {

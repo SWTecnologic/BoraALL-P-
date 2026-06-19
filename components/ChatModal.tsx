@@ -15,6 +15,7 @@ import {
   Alert,
   Animated,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { User, Send, ChevronDown, MessageCircle, Mic, X, Play, Pause, StopCircle } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { Audio } from 'expo-av';
@@ -44,6 +45,7 @@ interface ChatModalProps {
 }
 
 export function ChatModal({ visible, corridaId, usuarioId, driverName, onClose }: ChatModalProps) {
+  const insets = useSafeAreaInsets();
   const [mensagens, setMensagens] = useState<ChatMessage[]>([]);
   const [novaMensagem, setNovaMensagem] = useState('');
   const [loading, setLoading] = useState(false);
@@ -403,150 +405,171 @@ export function ChatModal({ visible, corridaId, usuarioId, driverName, onClose }
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.overlay}>
-          <View style={styles.chatContainer}>
-            {/* HEADER */}
-            <View style={styles.header}>
-              <View style={styles.headerInfo}>
-                <View style={styles.avatar}>
-                  <User size={20} color="#FFF" />
+      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+        <KeyboardAvoidingView 
+          style={styles.container} 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+          <View style={styles.overlay}>
+            <View style={[
+              styles.chatContainer,
+              { 
+                paddingBottom: insets.bottom > 0 ? insets.bottom : 16,
+              }
+            ]}>
+              {/* HEADER */}
+              <View style={styles.header}>
+                <View style={styles.headerInfo}>
+                  <View style={styles.avatar}>
+                    <User size={20} color="#FFF" />
+                  </View>
+                  <View>
+                    <Text style={styles.headerTitle}>{driverName}</Text>
+                    <Text style={styles.headerSubtitle}>Motorista</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.headerTitle}>{driverName}</Text>
-                  <Text style={styles.headerSubtitle}>Motorista</Text>
-                </View>
+                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                  <ChevronDown size={24} color="#374151" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                <ChevronDown size={24} color="#374151" />
-              </TouchableOpacity>
-            </View>
 
-            {/* MENSAGENS */}
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#1E40AF" />
-                <Text style={styles.loadingText}>Carregando mensagens...</Text>
-              </View>
-            ) : (
-              <FlatList
-                ref={flatListRef}
-                data={mensagens}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.messagesList}
-                renderItem={({ item }) => {
-                  const isMyMessage = item.tipo_remetente === 'passageiro' && item.remetente_id === usuarioId;
-                  
-                  return (
-                    <View style={[styles.messageBubble, isMyMessage ? styles.myMessage : styles.otherMessage]}>
-                      {item.tipo_mensagem === 'audio' ? (
-                        renderAudioMessage(item, isMyMessage)
-                      ) : (
-                        <>
-                          <Text style={[styles.messageText, isMyMessage ? styles.myMessageText : styles.otherMessageText]}>
-                            {item.mensagem}
-                          </Text>
-                          <Text style={[styles.messageTime, isMyMessage ? styles.myMessageTime : styles.otherMessageTime]}>
-                            {formatHora(item.created_at)}
-                          </Text>
-                        </>
-                      )}
-                    </View>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <MessageCircle size={48} color="#D1D5DB" />
-                    <Text style={styles.emptyText}>Nenhuma mensagem ainda</Text>
-                    <Text style={styles.emptySubtext}>Envie uma mensagem ou áudio para o motorista</Text>
-                  </View>
-                }
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-              />
-            )}
-
-            {/* INPUT COM ÁUDIO */}
-            <View style={styles.inputContainer}>
-              {gravando ? (
-                <View style={styles.recordingContainer}>
-                  <Animated.View style={{ transform: [{ scale: gravandoAnim }] }}>
-                    <View style={styles.recordingIndicator}>
-                      <View style={styles.recordingDot} />
-                      <Text style={styles.recordingText}>Gravando...</Text>
-                    </View>
-                  </Animated.View>
-                  <TouchableOpacity style={styles.stopRecordBtn} onPress={stopRecording}>
-                    <StopCircle size={28} color="#EF4444" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelRecordBtn} onPress={cancelRecording}>
-                    <X size={24} color="#6B7280" />
-                  </TouchableOpacity>
-                </View>
-              ) : audioGravado ? (
-                <View style={styles.audioPreviewContainer}>
-                  <View style={styles.audioPreview}>
-                    <Mic size={20} color="#1E40AF" />
-                    <Text style={styles.audioPreviewText}>Áudio gravado!</Text>
-                  </View>
-                  <View style={styles.audioPreviewActions}>
-                    <TouchableOpacity style={styles.cancelAudioBtn} onPress={() => setAudioGravado(null)}>
-                      <X size={20} color="#EF4444" />
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.sendAudioBtn} 
-                      onPress={enviarAudioGravado}
-                      disabled={enviandoAudio}
-                    >
-                      {enviandoAudio ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <Send size={18} color="#FFF" />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : enviandoAudio ? (
-                <View style={styles.sendingContainer}>
+              {/* MENSAGENS */}
+              {loading ? (
+                <View style={styles.loadingContainer}>
                   <ActivityIndicator size="small" color="#1E40AF" />
-                  <Text style={styles.sendingText}>Enviando áudio...</Text>
+                  <Text style={styles.loadingText}>Carregando mensagens...</Text>
                 </View>
               ) : (
-                <>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Digite sua mensagem..."
-                    placeholderTextColor="#9CA3AF"
-                    value={novaMensagem}
-                    onChangeText={setNovaMensagem}
-                    multiline
-                    maxLength={500}
-                  />
-                  <TouchableOpacity
-                    style={styles.micBtn}
-                    onPress={startRecording}
-                  >
-                    <Mic size={20} color="#FFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sendBtn, !novaMensagem.trim() && { opacity: 0.5 }]}
-                    onPress={enviarMensagemTexto}
-                    disabled={!novaMensagem.trim()}
-                  >
-                    <Send size={20} color="#FFF" />
-                  </TouchableOpacity>
-                </>
+                <FlatList
+                  ref={flatListRef}
+                  data={mensagens}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.messagesList}
+                  renderItem={({ item }) => {
+                    const isMyMessage = item.tipo_remetente === 'passageiro' && item.remetente_id === usuarioId;
+                    
+                    return (
+                      <View style={[styles.messageBubble, isMyMessage ? styles.myMessage : styles.otherMessage]}>
+                        {item.tipo_mensagem === 'audio' ? (
+                          renderAudioMessage(item, isMyMessage)
+                        ) : (
+                          <>
+                            <Text style={[styles.messageText, isMyMessage ? styles.myMessageText : styles.otherMessageText]}>
+                              {item.mensagem}
+                            </Text>
+                            <Text style={[styles.messageTime, isMyMessage ? styles.myMessageTime : styles.otherMessageTime]}>
+                              {formatHora(item.created_at)}
+                            </Text>
+                          </>
+                        )}
+                      </View>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={styles.emptyContainer}>
+                      <MessageCircle size={48} color="#D1D5DB" />
+                      <Text style={styles.emptyText}>Nenhuma mensagem ainda</Text>
+                      <Text style={styles.emptySubtext}>Envie uma mensagem ou áudio para o motorista</Text>
+                    </View>
+                  }
+                  onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                />
               )}
+
+              {/* INPUT COM ÁUDIO */}
+              <View style={styles.inputContainer}>
+                {gravando ? (
+                  <View style={styles.recordingContainer}>
+                    <Animated.View style={{ transform: [{ scale: gravandoAnim }] }}>
+                      <View style={styles.recordingIndicator}>
+                        <View style={styles.recordingDot} />
+                        <Text style={styles.recordingText}>Gravando...</Text>
+                      </View>
+                    </Animated.View>
+                    <TouchableOpacity style={styles.stopRecordBtn} onPress={stopRecording}>
+                      <StopCircle size={28} color="#EF4444" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.cancelRecordBtn} onPress={cancelRecording}>
+                      <X size={24} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+                ) : audioGravado ? (
+                  <View style={styles.audioPreviewContainer}>
+                    <View style={styles.audioPreview}>
+                      <Mic size={20} color="#1E40AF" />
+                      <Text style={styles.audioPreviewText}>Áudio gravado!</Text>
+                    </View>
+                    <View style={styles.audioPreviewActions}>
+                      <TouchableOpacity style={styles.cancelAudioBtn} onPress={() => setAudioGravado(null)}>
+                        <X size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={styles.sendAudioBtn} 
+                        onPress={enviarAudioGravado}
+                        disabled={enviandoAudio}
+                      >
+                        {enviandoAudio ? (
+                          <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                          <Send size={18} color="#FFF" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : enviandoAudio ? (
+                  <View style={styles.sendingContainer}>
+                    <ActivityIndicator size="small" color="#1E40AF" />
+                    <Text style={styles.sendingText}>Enviando áudio...</Text>
+                  </View>
+                ) : (
+                  <>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Digite sua mensagem..."
+                      placeholderTextColor="#9CA3AF"
+                      value={novaMensagem}
+                      onChangeText={setNovaMensagem}
+                      multiline
+                      maxLength={500}
+                    />
+                    <TouchableOpacity
+                      style={styles.micBtn}
+                      onPress={startRecording}
+                    >
+                      <Mic size={20} color="#FFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.sendBtn, !novaMensagem.trim() && { opacity: 0.5 }]}
+                      onPress={enviarMensagemTexto}
+                      disabled={!novaMensagem.trim()}
+                    >
+                      <Send size={20} color="#FFF" />
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
             </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  container: { 
+    flex: 1,
+  },
+  overlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    justifyContent: 'flex-end' 
+  },
   chatContainer: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,

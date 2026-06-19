@@ -148,7 +148,6 @@ function NoProfilePhotoModal({ visible, onClose, onGoToProfile }: NoProfilePhoto
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={noPhotoStyles.overlay}>
         <Animated.View style={[noPhotoStyles.card, { transform: [{ scale: scaleAnim }] }]}>
-          {/* Ícone */}
           <View style={noPhotoStyles.iconContainer}>
             <Camera size={36} color="#1E40AF" />
           </View>
@@ -317,7 +316,10 @@ function AlertModal({ visible, driverName, originAddress, destAddress, driverCoo
   );
 }
 
+// ─── MODAL: PERFIL DO MOTORISTA COM SAFEAREAVIEW ──────────────────────
+
 function DriverProfileModal({ visible, driverId, driverName, driverRating, onClose, onBlockDriver }: DriverProfileModalProps) {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [showBlockReasons, setShowBlockReasons] = useState(false);
   const [selectedBlockReason, setSelectedBlockReason] = useState<string | null>(null);
@@ -386,106 +388,111 @@ function DriverProfileModal({ visible, driverId, driverName, driverRating, onClo
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={driverProfileStyles.overlay}>
-        <View style={driverProfileStyles.card}>
-          <View style={driverProfileStyles.handle} />
-          {loading ? (
-            <View style={driverProfileStyles.loadingContainer}>
-              <ActivityIndicator size="large" color="#1E40AF" />
-              <Text style={driverProfileStyles.loadingText}>Carregando perfil...</Text>
-            </View>
-          ) : showBlockReasons ? (
-            <>
-              <Text style={driverProfileStyles.blockReasonTitle}>Motivo do bloqueio</Text>
-              <Text style={driverProfileStyles.blockReasonSubtitle}>
-                Selecione o motivo pelo qual deseja bloquear {driverName}:
-              </Text>
-              <View style={driverProfileStyles.reasonsList}>
-                {BLOCK_REASONS.map((reason) => (
-                  <TouchableOpacity
-                    key={reason.id}
-                    style={[driverProfileStyles.reasonItem, selectedBlockReason === reason.id && driverProfileStyles.reasonItemSelected]}
-                    onPress={() => setSelectedBlockReason(reason.id)}
-                  >
-                    <View style={[driverProfileStyles.reasonRadio, selectedBlockReason === reason.id && driverProfileStyles.reasonRadioSelected]}>
-                      {selectedBlockReason === reason.id && <View style={driverProfileStyles.reasonRadioInner} />}
+      <SafeAreaView style={driverProfileStyles.safeArea} edges={['bottom']}>
+        <View style={driverProfileStyles.overlay}>
+          <View style={[
+            driverProfileStyles.card,
+            { paddingBottom: insets.bottom > 0 ? insets.bottom + 24 : 24 }
+          ]}>
+            <View style={driverProfileStyles.handle} />
+            {loading ? (
+              <View style={driverProfileStyles.loadingContainer}>
+                <ActivityIndicator size="large" color="#1E40AF" />
+                <Text style={driverProfileStyles.loadingText}>Carregando perfil...</Text>
+              </View>
+            ) : showBlockReasons ? (
+              <>
+                <Text style={driverProfileStyles.blockReasonTitle}>Motivo do bloqueio</Text>
+                <Text style={driverProfileStyles.blockReasonSubtitle}>
+                  Selecione o motivo pelo qual deseja bloquear {driverName}:
+                </Text>
+                <View style={driverProfileStyles.reasonsList}>
+                  {BLOCK_REASONS.map((reason) => (
+                    <TouchableOpacity
+                      key={reason.id}
+                      style={[driverProfileStyles.reasonItem, selectedBlockReason === reason.id && driverProfileStyles.reasonItemSelected]}
+                      onPress={() => setSelectedBlockReason(reason.id)}
+                    >
+                      <View style={[driverProfileStyles.reasonRadio, selectedBlockReason === reason.id && driverProfileStyles.reasonRadioSelected]}>
+                        {selectedBlockReason === reason.id && <View style={driverProfileStyles.reasonRadioInner} />}
+                      </View>
+                      <Text style={[driverProfileStyles.reasonLabel, selectedBlockReason === reason.id && driverProfileStyles.reasonLabelSelected]}>
+                        {reason.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={[driverProfileStyles.blockConfirmBtn, !selectedBlockReason && { opacity: 0.5 }]}
+                  onPress={handleConfirmBlock}
+                  disabled={!selectedBlockReason}
+                >
+                  <Shield size={20} color="#FFF" />
+                  <Text style={driverProfileStyles.blockConfirmBtnText}>Confirmar bloqueio</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={driverProfileStyles.closeBtn} onPress={() => setShowBlockReasons(false)}>
+                  <Text style={driverProfileStyles.closeBtnText}>Voltar</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={driverProfileStyles.header}>
+                  <View style={driverProfileStyles.avatarLarge}>
+                    {profile.foto_perfil ? (
+                      <Image source={{ uri: profile.foto_perfil }} style={driverProfileStyles.avatarImage} />
+                    ) : (
+                      <User size={40} color="#FFF" />
+                    )}
+                  </View>
+                  <Text style={driverProfileStyles.driverName}>{driverName}</Text>
+                  <View style={driverProfileStyles.ratingBadge}>
+                    <Star size={16} color="#FBBF24" fill="#FBBF24" />
+                    <Text style={driverProfileStyles.ratingText}>{profile.avaliacao_media?.toFixed(1) || driverRating.toFixed(1)}</Text>
+                  </View>
+                </View>
+                <View style={driverProfileStyles.section}>
+                  <Text style={driverProfileStyles.sectionTitle}>🚗 Veículo</Text>
+                  <View style={driverProfileStyles.infoGrid}>
+                    <View style={driverProfileStyles.infoItem}>
+                      <Text style={driverProfileStyles.infoLabel}>Modelo</Text>
+                      <Text style={driverProfileStyles.infoValue}>{profile.veiculo_modelo}</Text>
                     </View>
-                    <Text style={[driverProfileStyles.reasonLabel, selectedBlockReason === reason.id && driverProfileStyles.reasonLabelSelected]}>
-                      {reason.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity
-                style={[driverProfileStyles.blockConfirmBtn, !selectedBlockReason && { opacity: 0.5 }]}
-                onPress={handleConfirmBlock}
-                disabled={!selectedBlockReason}
-              >
-                <Shield size={20} color="#FFF" />
-                <Text style={driverProfileStyles.blockConfirmBtnText}>Confirmar bloqueio</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={driverProfileStyles.closeBtn} onPress={() => setShowBlockReasons(false)}>
-                <Text style={driverProfileStyles.closeBtnText}>Voltar</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View style={driverProfileStyles.header}>
-                <View style={driverProfileStyles.avatarLarge}>
-                  {profile.foto_perfil ? (
-                    <Image source={{ uri: profile.foto_perfil }} style={driverProfileStyles.avatarImage} />
-                  ) : (
-                    <User size={40} color="#FFF" />
-                  )}
-                </View>
-                <Text style={driverProfileStyles.driverName}>{driverName}</Text>
-                <View style={driverProfileStyles.ratingBadge}>
-                  <Star size={16} color="#FBBF24" fill="#FBBF24" />
-                  <Text style={driverProfileStyles.ratingText}>{profile.avaliacao_media?.toFixed(1) || driverRating.toFixed(1)}</Text>
-                </View>
-              </View>
-              <View style={driverProfileStyles.section}>
-                <Text style={driverProfileStyles.sectionTitle}>🚗 Veículo</Text>
-                <View style={driverProfileStyles.infoGrid}>
-                  <View style={driverProfileStyles.infoItem}>
-                    <Text style={driverProfileStyles.infoLabel}>Modelo</Text>
-                    <Text style={driverProfileStyles.infoValue}>{profile.veiculo_modelo}</Text>
-                  </View>
-                  <View style={driverProfileStyles.infoItem}>
-                    <Text style={driverProfileStyles.infoLabel}>Placa</Text>
-                    <Text style={driverProfileStyles.infoValue}>{profile.veiculo_placa}</Text>
-                  </View>
-                  <View style={driverProfileStyles.infoItem}>
-                    <Text style={driverProfileStyles.infoLabel}>Cor</Text>
-                    <Text style={driverProfileStyles.infoValue}>{profile.veiculo_cor}</Text>
+                    <View style={driverProfileStyles.infoItem}>
+                      <Text style={driverProfileStyles.infoLabel}>Placa</Text>
+                      <Text style={driverProfileStyles.infoValue}>{profile.veiculo_placa}</Text>
+                    </View>
+                    <View style={driverProfileStyles.infoItem}>
+                      <Text style={driverProfileStyles.infoLabel}>Cor</Text>
+                      <Text style={driverProfileStyles.infoValue}>{profile.veiculo_cor}</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-              <View style={driverProfileStyles.section}>
-                <Text style={driverProfileStyles.sectionTitle}>📊 Estatísticas</Text>
-                <View style={driverProfileStyles.statsContainer}>
-                  <View style={driverProfileStyles.statItem}>
-                    <Text style={driverProfileStyles.statNumber}>{profile.total_corridas}</Text>
-                    <Text style={driverProfileStyles.statLabel}>Corridas</Text>
-                  </View>
-                  <View style={driverProfileStyles.statDivider} />
-                  <View style={driverProfileStyles.statItem}>
-                    <Text style={driverProfileStyles.statNumber}>⭐ {profile.avaliacao_media?.toFixed(1) || '5.0'}</Text>
-                    <Text style={driverProfileStyles.statLabel}>Avaliação</Text>
+                <View style={driverProfileStyles.section}>
+                  <Text style={driverProfileStyles.sectionTitle}>📊 Estatísticas</Text>
+                  <View style={driverProfileStyles.statsContainer}>
+                    <View style={driverProfileStyles.statItem}>
+                      <Text style={driverProfileStyles.statNumber}>{profile.total_corridas}</Text>
+                      <Text style={driverProfileStyles.statLabel}>Corridas</Text>
+                    </View>
+                    <View style={driverProfileStyles.statDivider} />
+                    <View style={driverProfileStyles.statItem}>
+                      <Text style={driverProfileStyles.statNumber}>⭐ {profile.avaliacao_media?.toFixed(1) || '5.0'}</Text>
+                      <Text style={driverProfileStyles.statLabel}>Avaliação</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-              <TouchableOpacity style={driverProfileStyles.blockBtn} onPress={() => setShowBlockReasons(true)}>
-                <Shield size={20} color="#DC2626" />
-                <Text style={driverProfileStyles.blockBtnText}>Bloquear para futuras corridas</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={driverProfileStyles.closeBtn} onPress={onClose}>
-                <Text style={driverProfileStyles.closeBtnText}>Fechar</Text>
-              </TouchableOpacity>
-            </>
-          )}
+                <TouchableOpacity style={driverProfileStyles.blockBtn} onPress={() => setShowBlockReasons(true)}>
+                  <Shield size={20} color="#DC2626" />
+                  <Text style={driverProfileStyles.blockBtnText}>Bloquear para futuras corridas</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={driverProfileStyles.closeBtn} onPress={onClose}>
+                  <Text style={driverProfileStyles.closeBtnText}>Fechar</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -538,6 +545,7 @@ export default function PassengerHome() {
   const [driverCarModel, setDriverCarModel] = useState('');
   const [driverCarColor, setDriverCarColor] = useState('');
   const [driverTotalRides, setDriverTotalRides] = useState<number>(0);
+  const [driverPhoto, setDriverPhoto] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [showDriverProfile, setShowDriverProfile] = useState(false);
@@ -560,12 +568,63 @@ export default function PassengerHome() {
   const searchAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  // ── Função para buscar foto do motorista ──
+  const fetchDriverPhoto = async (motoristaId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('motoristas')
+        .select(`
+          usuarios:usuario_id (
+            foto_perfil_url
+          )
+        `)
+        .eq('id', motoristaId)
+        .single();
+
+      if (!error && data?.usuarios) {
+        const fotoUrl = (data.usuarios as any)?.foto_perfil_url;
+        setDriverPhoto(fotoUrl || null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar foto do motorista:', err);
+      setDriverPhoto(null);
+    }
+  };
+
+  // ── Função modificada para buscar informações do veículo E FOTO ──
   const fetchDriverVehicleInfo = async (motoristaId: string) => {
     try {
-      const { data, error } = await supabase.from('motoristas').select('veiculo_modelo, veiculo_cor, total_corridas').eq('id', motoristaId).single();
-      if (!error && data) { setDriverCarModel(data.veiculo_modelo || ''); setDriverCarColor(data.veiculo_cor || ''); setDriverTotalRides(data.total_corridas || 0); }
-    } catch (err) { console.error('Erro ao buscar veículo:', err); }
+      const { data, error } = await supabase
+        .from('motoristas')
+        .select(`
+          veiculo_modelo,
+          veiculo_cor,
+          total_corridas,
+          usuarios:usuario_id (
+            foto_perfil_url
+          )
+        `)
+        .eq('id', motoristaId)
+        .single();
+        
+      if (!error && data) {
+        setDriverCarModel(data.veiculo_modelo || '');
+        setDriverCarColor(data.veiculo_cor || '');
+        setDriverTotalRides(data.total_corridas || 0);
+        const fotoUrl = (data.usuarios as any)?.foto_perfil_url;
+        setDriverPhoto(fotoUrl || null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar veículo:', err);
+    }
   };
+
+  // ── Effect para buscar foto quando driverId mudar ──
+  useEffect(() => {
+    if (driverId) {
+      fetchDriverPhoto(driverId);
+    }
+  }, [driverId]);
 
   const calculateDistance = (c1: { latitude: number; longitude: number }, c2: { latitude: number; longitude: number }): number => {
     const R = 6371;
@@ -586,19 +645,33 @@ export default function PassengerHome() {
     }
   };
 
-  const fetchDriverRouteToPickup = async (driverPos: { latitude: number; longitude: number }) => {
+  // ⭐ NOVA FUNÇÃO: Atualiza rota do motorista em tempo real (polyline consumível)
+  const updateDriverRouteToPickup = async (driverPos: { latitude: number; longitude: number }) => {
     if (!originCoord) return;
+    
     try {
       const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${driverPos.latitude},${driverPos.longitude}&destination=${originCoord.latitude},${originCoord.longitude}&language=pt-BR&key=${GOOGLE_API_KEY}`;
       const res = await fetch(url);
       const json = await res.json();
+      
       if (json.status === 'OK' && json.routes.length > 0) {
         const leg = json.routes[0].legs[0];
+        
+        // Atualiza distância e tempo RESTANTES
         setDriverToPickupDistance(leg.distance.text);
         setDriverToPickupDuration(leg.duration.text);
-        setDriverRouteCoords(decodePolyline(json.routes[0].overview_polyline.points));
+        
+        // Pega a rota da posição ATUAL do motorista até o passageiro
+        const remainingRoute = decodePolyline(json.routes[0].overview_polyline.points);
+        
+        // Atualiza o polyline com a rota restante (consumindo o que já foi percorrido)
+        setDriverRouteCoords(remainingRoute);
+        
+        console.log(`🚗 Motorista se moveu - Distância restante: ${leg.distance.text}, Tempo: ${leg.duration.text}`);
       }
-    } catch (e) { console.error('Erro ao buscar rota do motorista:', e); }
+    } catch (e) { 
+      console.error('Erro ao atualizar rota do motorista:', e); 
+    }
   };
 
   const fetchRoute = async (origin: { latitude: number; longitude: number }, dest: { latitude: number; longitude: number }, fitCamera = true) => {
@@ -644,33 +717,102 @@ export default function PassengerHome() {
     setDriverToPickupDistance(null); setDriverToPickupDuration(null);
     setDriverId(null);
     setDriverCarModel(''); setDriverCarColor(''); setDriverTotalRides(0);
+    setDriverPhoto(null);
     setShowDriverCurrentRide(false);
     setReservedRouteDriverToDropoff([]); setReservedRouteDropoffToOrigin([]); setReservedDropoffCoord(null);
     clearInterval(rideTimerRef.current); clearInterval(pollRideRef.current);
     if (originCoord) mapRef.current?.animateToRegion({ ...originCoord, latitudeDelta: 0.015, longitudeDelta: 0.015 }, 600);
   };
 
-  const performCancellation = async (withPenalty: boolean) => {
-    if (currentRideId) {
-      try {
-        const updateData: any = { status: 'cancelada', cancelado_por: 'passageiro', updated_at: new Date().toISOString() };
-        if (withPenalty) updateData.multa_cancelamento = CANCELLATION_PENALTY_AMOUNT;
-        await supabase.from('corridas').update(updateData).eq('id', currentRideId);
-      } catch (err) { console.warn('Erro ao cancelar:', err); }
-    }
-    resetRide();
-    if (withPenalty) Alert.alert('Corrida cancelada', `Multa de R$ ${CANCELLATION_PENALTY_AMOUNT.toFixed(2)} será cobrada na sua próxima corrida.`);
+  // ⭐ NOVA: Verifica se deve aplicar multa por cancelamento
+  const shouldApplyPenalty = (): boolean => {
+    if (!currentRideCreatedAt) return false;
+    const now = new Date();
+    const createdAt = new Date(currentRideCreatedAt);
+    const diffMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
+    return diffMinutes > CANCEL_FREE_MINUTES;
   };
 
+  // ⭐ NOVA: Função de cancelamento com verificação de multa
+  const performCancellation = async (withPenalty: boolean, penaltyAmount?: number) => {
+    if (currentRideId) {
+      try {
+        const updateData: any = { 
+          status: 'cancelada', 
+          cancelado_por: 'passageiro', 
+          updated_at: new Date().toISOString() 
+        };
+        
+        if (withPenalty && penaltyAmount) {
+          updateData.multa_cancelamento = penaltyAmount;
+        }
+        
+        await supabase.from('corridas').update(updateData).eq('id', currentRideId);
+      } catch (err) { 
+        console.warn('Erro ao cancelar:', err); 
+      }
+    }
+    
+    resetRide();
+    
+    if (withPenalty && penaltyAmount) {
+      Alert.alert(
+        'Corrida cancelada com multa', 
+        `Como se passaram mais de ${CANCEL_FREE_MINUTES} minutos, será cobrada uma multa de R$ ${penaltyAmount.toFixed(2)} na sua próxima corrida.`
+      );
+    }
+  };
+
+  // ⭐ NOVA: Lógica de cancelamento com verificação de tempo
   const handleCancelRide = async () => {
-    if (step === 'in_progress') { Alert.alert('Cancelamento indisponível', 'Não é possível cancelar a corrida após o início da viagem.'); return; }
-    if ((step === 'searching' || step === 'accepted' || step === 'reservada') && currentRideId) {
-      Alert.alert('Cancelar', step === 'searching' ? 'Cancelar busca por motorista?' : 'Cancelar corrida?', [
+    // Não permite cancelar corrida em andamento
+    if (step === 'in_progress') { 
+      Alert.alert('Cancelamento indisponível', 'Não é possível cancelar a corrida após o início da viagem.'); 
+      return; 
+    }
+    
+    // Se estiver procurando motorista (searching), cancela sem multa
+    if (step === 'searching' && currentRideId) {
+      Alert.alert('Cancelar busca', 'Deseja cancelar a busca por motorista?', [
         { text: 'Não', style: 'cancel' },
         { text: 'Sim, cancelar', onPress: () => performCancellation(false), style: 'destructive' },
       ]);
       return;
     }
+    
+    // Se já foi aceita ou está reservada, verifica tempo
+    if ((step === 'accepted' || step === 'reservada') && currentRideId) {
+      const hasPenalty = shouldApplyPenalty();
+      
+      if (hasPenalty) {
+        Alert.alert(
+          'Atenção - Multa por cancelamento',
+          `Já se passaram mais de ${CANCEL_FREE_MINUTES} minutos desde que a corrida foi solicitada.\n\nSe cancelar agora, será cobrada uma multa de R$ ${CANCELLATION_PENALTY_AMOUNT.toFixed(2)}.`,
+          [
+            { text: 'Voltar', style: 'cancel' },
+            { 
+              text: `Pagar multa de R$ ${CANCELLATION_PENALTY_AMOUNT.toFixed(2)}`, 
+              onPress: () => performCancellation(true, CANCELLATION_PENALTY_AMOUNT),
+              style: 'destructive' 
+            },
+          ]
+        );
+      } else {
+        const minutesLeft = CANCEL_FREE_MINUTES - (new Date().getTime() - new Date(currentRideCreatedAt!).getTime()) / (1000 * 60);
+        
+        Alert.alert(
+          'Cancelar corrida',
+          `Você ainda está dentro do período de cancelamento grátis (${Math.ceil(minutesLeft)} min restantes).\n\nDeseja cancelar sem multa?`,
+          [
+            { text: 'Não', style: 'cancel' },
+            { text: 'Sim, cancelar grátis', onPress: () => performCancellation(false), style: 'destructive' },
+          ]
+        );
+      }
+      return;
+    }
+    
+    // Qualquer outro caso, apenas reseta
     resetRide();
   };
 
@@ -681,13 +823,11 @@ export default function PassengerHome() {
       return;
     }
 
-    // Bloqueia se não tiver foto de perfil
     if (hasFotoProfile === false) {
       setShowNoPhotoModal(true);
       return;
     }
 
-    // Se ainda estiver carregando, faz a verificação direto no banco para garantir
     if (hasFotoProfile === null || loadingFoto) {
       try {
         await refetchFoto();
@@ -938,9 +1078,11 @@ export default function PassengerHome() {
     return () => { if (watcher) watcher.remove(); };
   }, [step]);
 
+  // ⭐ POLLING ATUALIZADO: Atualiza rota do motorista em tempo real
   useEffect(() => {
     const isActive = step === 'searching' || step === 'accepted' || step === 'in_progress' || step === 'reservada';
     if (!isActive || !currentRideId) return;
+    
     const pollRide = async () => {
       try {
         const { data: ride } = await supabase
@@ -948,31 +1090,75 @@ export default function PassengerHome() {
           .select(`status, motorista_latitude, motorista_longitude, motoristas!inner(id, avaliacao_media, usuarios:usuario_id(nome_completo, telefone))`)
           .eq('id', currentRideId).single();
         if (!ride) return;
+        
         const newStep = mapStatusToStep(ride.status);
+        
+        // Se o status mudou
         if (newStep !== step && ride.status !== 'cancelada' && ride.status !== 'finalizada') {
           setStep(newStep);
+          
           if (newStep === 'accepted' && ride.motoristas) {
-            setDriverId(ride.motoristas.id); setDriverName(ride.motoristas.usuarios?.nome_completo || 'Motorista');
-            setDriverRating(ride.motoristas.avaliacao_media || 5); fetchDriverVehicleInfo(ride.motoristas.id);
+            setDriverId(ride.motoristas.id); 
+            setDriverName(ride.motoristas.usuarios?.nome_completo || 'Motorista');
+            setDriverRating(ride.motoristas.avaliacao_media || 5); 
+            fetchDriverVehicleInfo(ride.motoristas.id);
           }
+          
           if (newStep === 'reservada') setShowDriverCurrentRide(true);
+          
           if (newStep === 'accepted' && ride.motorista_latitude && ride.motorista_longitude) {
-            await fetchDriverRouteToPickup({ latitude: ride.motorista_latitude, longitude: ride.motorista_longitude });
+            await updateDriverRouteToPickup({ 
+              latitude: ride.motorista_latitude, 
+              longitude: ride.motorista_longitude 
+            });
             setShowDriverCurrentRide(false);
           }
+          
           if (newStep === 'in_progress') {
-            setShowDriverCurrentRide(false); setDriverRouteCoords([]);
-            setDriverToPickupDistance(null); setDriverToPickupDuration(null);
-            setReservedRouteDriverToDropoff([]); setReservedRouteDropoffToOrigin([]); setReservedDropoffCoord(null);
+            setShowDriverCurrentRide(false); 
+            setDriverRouteCoords([]);
+            setDriverToPickupDistance(null); 
+            setDriverToPickupDuration(null);
+            setReservedRouteDriverToDropoff([]); 
+            setReservedRouteDropoffToOrigin([]); 
+            setReservedDropoffCoord(null);
           }
         }
+        
+        // ⭐ ATUALIZA ROTA EM TEMPO REAL: Se motorista se moveu e status é 'accepted'
+        if (step === 'accepted' && ride.status === 'aceita' && 
+            ride.motorista_latitude && ride.motorista_longitude) {
+          const newDriverPos = {
+            latitude: ride.motorista_latitude,
+            longitude: ride.motorista_longitude
+          };
+          
+          // Verifica se a posição mudou significativamente
+          if (driverCoord && 
+              (Math.abs(driverCoord.latitude - newDriverPos.latitude) > 0.0001 ||
+               Math.abs(driverCoord.longitude - newDriverPos.longitude) > 0.0001)) {
+            
+            setDriverCoord(newDriverPos);
+            await updateDriverRouteToPickup(newDriverPos);
+          } else if (!driverCoord) {
+            setDriverCoord(newDriverPos);
+            await updateDriverRouteToPickup(newDriverPos);
+          }
+        }
+        
         if (ride.status === 'finalizada') handleRideCompleted();
-        if (ride.status === 'cancelada') { resetRide(); Alert.alert('Corrida cancelada', 'Sua corrida foi cancelada.'); }
-      } catch (err) { console.error('Erro no poll:', err); }
+        if (ride.status === 'cancelada') { 
+          resetRide(); 
+          Alert.alert('Corrida cancelada', 'Sua corrida foi cancelada.'); 
+        }
+      } catch (err) { 
+        console.error('Erro no poll:', err); 
+      }
     };
+    
     pollRideRef.current = setInterval(pollRide, 3000);
     return () => clearInterval(pollRideRef.current);
-  }, [step, currentRideId]);
+  }, [step, currentRideId, driverCoord]);
 
   const cardTranslateY = cardAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] });
   const spin = searchAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
@@ -995,10 +1181,22 @@ export default function PassengerHome() {
   const isReservada = step === 'reservada';
   const hideTopBar = isSearching || isAccepted || isInProgress || isReservada;
 
+  // ── RENDER DO CARD DO MOTORISTA COM FOTO ──
   const renderDriverCard = (showDistanceInfo: boolean) => (
     <TouchableOpacity style={styles.driverCard} onPress={handleViewDriverProfile} activeOpacity={0.7}>
       <View style={styles.driverHeader}>
-        <View style={styles.driverAvatarPlaceholder}><Car size={20} color="#FFF" /></View>
+        <View style={styles.driverAvatarWrapper}>
+          {driverPhoto ? (
+            <Image 
+              source={{ uri: driverPhoto }} 
+              style={styles.driverAvatarImage}
+            />
+          ) : (
+            <View style={styles.driverAvatarPlaceholder}>
+              <Car size={20} color="#FFF" />
+            </View>
+          )}
+        </View>
         <View style={styles.driverInfo}>
           <Text style={styles.driverName}>{driverName}</Text>
           <View style={styles.driverRatingWrap}>
@@ -1008,20 +1206,28 @@ export default function PassengerHome() {
           </View>
         </View>
         <View style={styles.driverActions}>
-          <TouchableOpacity style={styles.chatBtn} onPress={handleOpenChat}><MessageCircle size={20} color="#1E40AF" /></TouchableOpacity>
-          <TouchableOpacity style={styles.alertBtn} onPress={() => setShowAlertModal(true)}><AlertTriangle size={20} color="#DC2626" /></TouchableOpacity>
+          <TouchableOpacity style={styles.chatBtn} onPress={handleOpenChat}>
+            <MessageCircle size={20} color="#1E40AF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.alertBtn} onPress={() => setShowAlertModal(true)}>
+            <AlertTriangle size={20} color="#DC2626" />
+          </TouchableOpacity>
         </View>
       </View>
       {(driverCarModel || driverCarColor) && (
         <View style={styles.driverVehicleRow}>
           <Car size={13} color="#6B7280" />
-          <Text style={styles.driverVehicleText}>{[driverCarModel, driverCarColor].filter(Boolean).join(' • ')}</Text>
+          <Text style={styles.driverVehicleText}>
+            {[driverCarModel, driverCarColor].filter(Boolean).join(' • ')}
+          </Text>
         </View>
       )}
       {showDistanceInfo && driverToPickupDistance && (
         <View style={styles.driverDistanceInfo}>
           <Navigation size={13} color="#10B981" />
-          <Text style={styles.driverDistanceText}>A {driverToPickupDistance} de você • {driverToPickupDuration}</Text>
+          <Text style={styles.driverDistanceText}>
+            A {driverToPickupDistance} de você • {driverToPickupDuration}
+          </Text>
         </View>
       )}
       <Text style={styles.viewMoreText}>Toque para ver perfil completo →</Text>
@@ -1131,8 +1337,12 @@ export default function PassengerHome() {
           </Marker>
         )}
 
+        {/* ⭐ POLYLINE CONSUMÍVEL: Rota restante do motorista */}
         {isAccepted && driverRouteCoords.length > 1 && (
-          <><Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} /><Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} /></>
+          <>
+            <Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} />
+            <Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} />
+          </>
         )}
         {isInProgress && routeCoords.length > 1 && (
           <><Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} /><Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} /></>
@@ -1152,7 +1362,6 @@ export default function PassengerHome() {
       {/* ── Topbar com campos de origem/destino + botões de pin ── */}
       {!hideTopBar && (
         <SafeAreaView style={styles.overlay} edges={['top']}>
-          {/* Banner de aviso: sem foto de perfil */}
           {hasFotoProfile === false && (
             <TouchableOpacity
               style={styles.noPhotoBanner}
@@ -1231,7 +1440,7 @@ export default function PassengerHome() {
         </SafeAreaView>
       )}
 
-      {/* ── Card de confirmação (botão Confirmar corrida) ── */}
+      {/* ── Card de confirmação ── */}
       {!hideTopBar && (
         <Animated.View
           style={[
@@ -1279,7 +1488,7 @@ export default function PassengerHome() {
         </Animated.View>
       )}
 
-      {/* ── Card de busca (procurando motorista) ── */}
+      {/* ── Card de busca ── */}
       {isSearching && (
         <SafeAreaView style={styles.searchingOverlay} edges={['bottom']}>
           <View style={[styles.searchingCard, { paddingBottom: insets.bottom || 24 }]}>
@@ -1328,14 +1537,13 @@ export default function PassengerHome() {
         </SafeAreaView>
       )}
 
-      {/* ── Card de em viagem ── */}
+      {/* ⭐ Card de em viagem - SEM botão de cancelamento */}
       {isInProgress && (
         <SafeAreaView style={styles.inProgressOverlay} edges={['bottom', 'top']}>
           {renderDriverCard(false)}
           <View style={[styles.inProgressCard, { paddingBottom: insets.bottom || 24 }]}>
             <View style={styles.cardHandle} />
             <View style={styles.phaseStatus}><View style={styles.phaseContent}><Car size={16} color="#1E40AF" /><Text style={styles.phaseText}>Em viagem para o destino</Text></View></View>
-            <View style={styles.noCancelWarning}><Text style={styles.noCancelText}>Cancelamento não disponível após o início da viagem</Text></View>
           </View>
         </SafeAreaView>
       )}
@@ -1448,9 +1656,25 @@ const noPhotoStyles = StyleSheet.create({
   },
 });
 
+// ── Estilos do DriverProfileModal ──
 const driverProfileStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  card: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24, paddingTop: 12, maxHeight: SCREEN_HEIGHT * 0.80 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  overlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    justifyContent: 'flex-end' 
+  },
+  card: { 
+    backgroundColor: '#FFFFFF', 
+    borderTopLeftRadius: 28, 
+    borderTopRightRadius: 28, 
+    paddingHorizontal: 24, 
+    paddingTop: 12,
+    maxHeight: SCREEN_HEIGHT * 0.80,
+  },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 20 },
   loadingContainer: { paddingVertical: 40, alignItems: 'center', gap: 12 },
   loadingText: { fontSize: 14, color: '#6B7280' },
@@ -1670,6 +1894,8 @@ const styles = StyleSheet.create({
   inProgressOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'space-between', zIndex: 25, pointerEvents: 'box-none' },
   driverCard: { marginHorizontal: 16, marginTop: 12, backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
   driverHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  driverAvatarWrapper: { width: 48, height: 48, borderRadius: 24, overflow: 'hidden', backgroundColor: '#1E40AF' },
+  driverAvatarImage: { width: 48, height: 48, borderRadius: 24 },
   driverAvatarPlaceholder: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#1E40AF', alignItems: 'center', justifyContent: 'center' },
   driverInfo: { flex: 1 },
   driverName: { fontSize: 16, fontWeight: '700', color: '#111827' },
