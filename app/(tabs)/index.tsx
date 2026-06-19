@@ -56,6 +56,7 @@ import { MapPickerModal } from '@/components/MapPickerModal';
 const GOOGLE_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey || '';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// ⭐ COORDENADAS DE SANTA RITA DO SAPUCAÍ
 const SANTA_RITA_COORDS = { latitude: -22.2464, longitude: -45.7033 };
 const PRICE_PER_KM = 3.15;
 const MINIMUM_FARE = 8.0;
@@ -564,9 +565,9 @@ export default function PassengerHome() {
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [mapPickerTarget, setMapPickerTarget] = useState<'origin' | 'dest' | null>(null);
 
+  // ⭐ ANIMAÇÕES - REMOVIDA A ANIMAÇÃO DE PULSO DO CARRO
   const cardAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // ── Função para buscar foto do motorista ──
   const fetchDriverPhoto = async (motoristaId: string) => {
@@ -625,6 +626,8 @@ export default function PassengerHome() {
       fetchDriverPhoto(driverId);
     }
   }, [driverId]);
+
+  // ⭐ REMOVIDO O EFFECT DA ANIMAÇÃO DE PULSO DO CARRO
 
   const calculateDistance = (c1: { latitude: number; longitude: number }, c2: { latitude: number; longitude: number }): number => {
     const R = 6371;
@@ -867,26 +870,61 @@ export default function PassengerHome() {
     } catch (err) { Alert.alert('Erro', 'Erro inesperado.'); setStep('confirming'); }
   };
 
+  // ⭐ FUNÇÃO DE INICIALIZAÇÃO COM FOCO EM SANTA RITA QUANDO TIVER CORRIDA ATIVA
   const initLocation = async () => {
     setLoadingLocation(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Localização necessária', 'Ative a localização para usar o app.'); return; }
+      if (status !== 'granted') { 
+        Alert.alert('Localização necessária', 'Ative a localização para usar o app.');
+        setLoadingLocation(false);
+        return;
+      }
+      
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coord = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
       setOriginCoord(coord);
-      const newRegion = { ...coord, latitudeDelta: 0.015, longitudeDelta: 0.015 };
-      setRegion(newRegion);
-      mapRef.current?.animateToRegion(newRegion, 800);
+      
+      // ⭐ VERIFICA SE TEM CORRIDA ATIVA PARA DEFINIR O FOCO DO MAPA
+      if (corridaAtiva) {
+        // Se tem corrida ativa, foca em Santa Rita do Sapucaí
+        const santaRitaRegion: Region = {
+          ...SANTA_RITA_COORDS,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
+        };
+        setRegion(santaRitaRegion);
+        mapRef.current?.animateToRegion(santaRitaRegion, 800);
+        console.log('📍 Corrida ativa - Focando em Santa Rita do Sapucaí');
+      } else {
+        // Se não tem corrida ativa, foca na localização atual do usuário
+        const userRegion: Region = {
+          ...coord,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setRegion(userRegion);
+        mapRef.current?.animateToRegion(userRegion, 800);
+        console.log('📍 Sem corrida ativa - Focando na localização atual');
+      }
+      
       try {
         const res = await Location.reverseGeocodeAsync(coord);
         if (res.length > 0) {
           const addr = [res[0].street, res[0].streetNumber, res[0].district].filter(Boolean).join(', ') || 'Localização atual';
           setOriginAddress(addr); originAutocompleteRef.current?.setAddressText(addr);
         }
-      } catch { setOriginAddress('Localização atual'); originAutocompleteRef.current?.setAddressText('Localização atual'); }
-    } catch (err) { Alert.alert('Erro', 'Não foi possível obter sua localização.'); }
-    finally { setLoadingLocation(false); }
+      } catch { 
+        setOriginAddress('Localização atual'); 
+        originAutocompleteRef.current?.setAddressText('Localização atual'); 
+      }
+    } catch (err) { 
+      console.error('Erro ao obter localização:', err);
+      Alert.alert('Erro', 'Não foi possível obter sua localização.'); 
+    }
+    finally { 
+      setLoadingLocation(false); 
+    }
   };
 
   const handleSelectOrigin = (data: any, details: any = null) => {
@@ -1002,17 +1040,6 @@ export default function PassengerHome() {
   }, []);
 
   useEffect(() => {
-    if ((step === 'accepted' || step === 'in_progress') && driverCoord) {
-      const pulse = Animated.loop(Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.3, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      ]));
-      pulse.start();
-      return () => pulse.stop();
-    } else { pulseAnim.setValue(1); }
-  }, [step, driverCoord]);
-
-  useEffect(() => {
     if (step === 'searching') {
       const loop = Animated.loop(Animated.timing(searchAnim, { toValue: 1, duration: 1200, useNativeDriver: true }));
       loop.start();
@@ -1027,17 +1054,25 @@ export default function PassengerHome() {
     }
   }, [step, currentRideId]);
 
+  // ⭐ EFECTO PARA CARREGAR CORRIDA ATIVA E FOCAR EM SANTA RITA
   useEffect(() => {
     if (loadingCorrida) return;
+    
     if (corridaAtiva) {
       setCurrentRideId(corridaAtiva.id);
       setCurrentRideCreatedAt(corridaAtiva.created_at || corridaAtiva.data_solicitacao || null);
       setOriginCoord({ latitude: corridaAtiva.origem_latitude, longitude: corridaAtiva.origem_longitude });
       setOriginAddress(corridaAtiva.origem_endereco);
-      if (corridaAtiva.destino_latitude) { setDestCoord({ latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }); setDestAddress(corridaAtiva.destino_endereco); }
+      
+      if (corridaAtiva.destino_latitude) { 
+        setDestCoord({ latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }); 
+        setDestAddress(corridaAtiva.destino_endereco); 
+      }
+      
       setDistance(corridaAtiva.distancia_km ? `${corridaAtiva.distancia_km.toFixed(1)} km` : null);
       setDuration(corridaAtiva.duracao_estimada ? `${corridaAtiva.duracao_estimada} min` : null);
       setPrice(corridaAtiva.valor_estimado);
+      
       if (corridaAtiva.motoristas) {
         setDriverId(corridaAtiva.motoristas.id);
         setDriverName(corridaAtiva.motoristas.usuarios?.nome_completo || 'Motorista');
@@ -1045,23 +1080,53 @@ export default function PassengerHome() {
         setDriverRating(corridaAtiva.motoristas.avaliacao_media || 5);
         fetchDriverVehicleInfo(corridaAtiva.motoristas.id);
       }
+      
       if (corridaAtiva.motorista_latitude && corridaAtiva.motorista_longitude) {
         setDriverCoord({ latitude: corridaAtiva.motorista_latitude, longitude: corridaAtiva.motorista_longitude });
       }
+      
       const newStep = mapStatusToStep(corridaAtiva.status);
       setStep(newStep);
+      
       if (corridaAtiva.status === 'reservada') setShowDriverCurrentRide(true);
+      
       if (corridaAtiva.origem_latitude && corridaAtiva.destino_latitude) {
-        fetchRoute({ latitude: corridaAtiva.origem_latitude, longitude: corridaAtiva.origem_longitude }, { latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }, false);
+        fetchRoute(
+          { latitude: corridaAtiva.origem_latitude, longitude: corridaAtiva.origem_longitude }, 
+          { latitude: corridaAtiva.destino_latitude, longitude: corridaAtiva.destino_longitude }, 
+          false
+        );
       }
+      
+      // ⭐ QUANDO TEM CORRIDA ATIVA, FOCO EM SANTA RITA DO SAPUCAÍ
+      const santaRitaRegion: Region = {
+        ...SANTA_RITA_COORDS,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      };
+      setRegion(santaRitaRegion);
+      // Aguarda o mapa estar pronto para animar
+      setTimeout(() => {
+        mapRef.current?.animateToRegion(santaRitaRegion, 600);
+      }, 500);
+      console.log('📍 Corrida ativa carregada - Focando em Santa Rita do Sapucaí');
     }
   }, [corridaAtiva, loadingCorrida]);
 
+  // ⭐ EFECTO DE INICIALIZAÇÃO - também verifica corrida ativa
   useEffect(() => {
-    const initialize = async () => { try { await initLocation(); } finally { setIsInitializing(false); } };
+    const initialize = async () => { 
+      try { 
+        await initLocation(); 
+      } finally { 
+        setIsInitializing(false); 
+      } 
+    };
     initialize();
-    return () => { if (locationWatcherRef.current) locationWatcherRef.current.remove(); };
-  }, []);
+    return () => { 
+      if (locationWatcherRef.current) locationWatcherRef.current.remove(); 
+    };
+  }, [corridaAtiva]); // Adiciona corridaAtiva como dependência
 
   useEffect(() => {
     let watcher: any = null;
@@ -1340,8 +1405,8 @@ export default function PassengerHome() {
         {/* ⭐ POLYLINE CONSUMÍVEL: Rota restante do motorista */}
         {isAccepted && driverRouteCoords.length > 1 && (
           <>
-            <Polyline coordinates={driverRouteCoords} strokeColor="#10B981" strokeWidth={6} lineDashPattern={[8, 4]} />
-            <Polyline coordinates={driverRouteCoords} strokeColor="#34D399" strokeWidth={3} />
+            <Polyline coordinates={driverRouteCoords} strokeColor="#000000" strokeWidth={8} lineDashPattern={[8, 4]} />
+            <Polyline coordinates={driverRouteCoords} strokeColor="#000000" strokeWidth={3} />
           </>
         )}
         {isInProgress && routeCoords.length > 1 && (
@@ -1350,11 +1415,15 @@ export default function PassengerHome() {
         {!hideTopBar && routeCoords.length > 1 && (
           <><Polyline coordinates={routeCoords} strokeColor="#0000FF" strokeWidth={8} /><Polyline coordinates={routeCoords} strokeColor="#1E40AF" strokeWidth={5} /></>
         )}
+        
+        {/* ⭐ MARCADOR DO MOTORISTA SEM ANIMAÇÃO DE PULSO - IMAGEM ESTÁTICA */}
         {(isAccepted || isInProgress) && driverCoord && (
           <Marker ref={driverMarkerRef} coordinate={driverCoord} anchor={{ x: 0.5, y: 0.5 }} zIndex={999} title={driverName}>
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-              <View style={styles.markerDriverPulse}><View style={styles.markerDriver}><View style={styles.markerDriverInner}><Car size={16} color="#FFF" /></View></View></View>
-            </Animated.View>
+            <Image
+              source={require('@/assets/images/Carro.png')}
+              style={styles.markerDriverImage}
+              resizeMode="contain"
+            />
           </Marker>
         )}
       </MapView>
@@ -1825,6 +1894,7 @@ const styles = StyleSheet.create({
   markerDriverPulse: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(59, 130, 246, 0.2)', alignItems: 'center', justifyContent: 'center' },
   markerDriver: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#FFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
   markerDriverInner: { alignItems: 'center', justifyContent: 'center' },
+  markerDriverImage: { width: 42, height: 42 },
   bottomCard: {
     position: 'absolute',
     bottom: 0,

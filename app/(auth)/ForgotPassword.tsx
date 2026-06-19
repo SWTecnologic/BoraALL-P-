@@ -12,9 +12,13 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 
 // 🔥 URL DA SUA EDGE FUNCTION NO SUPABASE
 const API_URL = 'https://tvzcvyvfhsslxggqwtny.supabase.co/functions/v1';
+
+// 🔥 PEGA A ANON KEY DO SUPABASE
+const SUPABASE_ANON_KEY = Constants.expoConfig?.extra?.supabaseAnonKey || '';
 
 export default function ForgotPassword() {
   const [step, setStep] = useState<'phone' | 'code' | 'newPassword'>('phone');
@@ -24,8 +28,20 @@ export default function ForgotPassword() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🔥 REMOVA: const [generatedCode, setGeneratedCode] = useState('');
-  // 🔥 REMOVA: const generateRandomCode = () => { ... }
+  // 🔥 FUNÇÃO PARA FAZER REQUISIÇÕES COM O HEADER CORRETO
+  const fetchWithAuth = async (endpoint: string, body: any) => {
+    const response = await fetch(`${API_URL}/${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(body),
+    });
+
+    return response;
+  };
 
   // 🔥 ENVIA CÓDIGO PARA O BACKEND (EDGE FUNCTION)
   const handleSendCode = async () => {
@@ -37,25 +53,28 @@ export default function ForgotPassword() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/send-reset-code`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          telefone: phone,
-        }),
+      console.log('📤 Enviando código para:', phone);
+
+      const response = await fetchWithAuth('send-reset-code', {
+        telefone: phone,
       });
 
       const data = await response.json();
+      console.log('📥 Resposta do envio:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Erro ao enviar código');
       }
 
-      Alert.alert('Sucesso', 'Código enviado para seu celular.');
+      Alert.alert(
+        '✅ Código enviado!',
+        `Seu código de verificação foi enviado para seu celular.`,
+        [{ text: 'OK' }]
+      );
+
       setStep('code');
     } catch (error: any) {
+      console.error('❌ Erro ao enviar:', error);
       Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
@@ -69,21 +88,20 @@ export default function ForgotPassword() {
       return;
     }
 
+    console.log('🔍 Verificando código:', code);
+    console.log('📱 Telefone:', phone);
+
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/verify-reset-code`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          telefone: phone,
-          code: code,
-        }),
+      const response = await fetchWithAuth('verify-reset-code', {
+        telefone: phone,
+        code: code,
       });
 
       const data = await response.json();
+      console.log('📥 Resposta da verificação:', data);
+      console.log('📊 Status da resposta:', response.status);
 
       if (!response.ok) {
         throw new Error(data.error || 'Código inválido');
@@ -92,6 +110,7 @@ export default function ForgotPassword() {
       Alert.alert('Sucesso', 'Código verificado! Agora crie uma nova senha.');
       setStep('newPassword');
     } catch (error: any) {
+      console.error('❌ Erro na verificação:', error);
       Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
@@ -115,22 +134,19 @@ export default function ForgotPassword() {
       return;
     }
 
+    console.log('🔑 Alterando senha para:', phone);
+
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/reset-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          telefone: phone,
-          code: code,
-          password: newPassword,
-        }),
+      const response = await fetchWithAuth('reset-password', {
+        telefone: phone,
+        code: code,
+        password: newPassword,
       });
 
       const data = await response.json();
+      console.log('📥 Resposta da alteração:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Erro ao alterar senha');
@@ -139,6 +155,7 @@ export default function ForgotPassword() {
       Alert.alert('Sucesso', 'Senha alterada com sucesso!');
       router.replace('/(auth)/login');
     } catch (error: any) {
+      console.error('❌ Erro ao alterar:', error);
       Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
@@ -150,17 +167,14 @@ export default function ForgotPassword() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/send-reset-code`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          telefone: phone,
-        }),
+      console.log('🔄 Reenviando código para:', phone);
+
+      const response = await fetchWithAuth('send-reset-code', {
+        telefone: phone,
       });
 
       const data = await response.json();
+      console.log('📥 Resposta do reenvio:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Erro ao reenviar código');
@@ -168,6 +182,7 @@ export default function ForgotPassword() {
 
       Alert.alert('Sucesso', 'Novo código enviado para seu celular.');
     } catch (error: any) {
+      console.error('❌ Erro ao reenviar:', error);
       Alert.alert('Erro', error.message);
     } finally {
       setLoading(false);
@@ -300,13 +315,13 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   backButtonText: {
-    color: '#FF6600',
+    color: '#FFD700',
     fontSize: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#FF6600',
+    color: '#FFD700',
     textAlign: 'center',
     marginBottom: 40,
   },
@@ -316,7 +331,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#FF6600',
+    color: '#FFD700',
     marginBottom: 8,
     marginLeft: 4,
     marginTop: 12,
@@ -333,7 +348,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   button: {
-    backgroundColor: '#FF6600',
+    backgroundColor: '#FFD700',
     paddingVertical: 16,
     borderRadius: 30,
     alignItems: 'center',
@@ -350,7 +365,7 @@ const styles = StyleSheet.create({
   },
   resendText: {
     textAlign: 'center',
-    color: '#FF6600',
+    color: '#FFD700',
     marginTop: 16,
     textDecorationLine: 'underline',
   },

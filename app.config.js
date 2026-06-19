@@ -10,7 +10,7 @@ export default {
     jsEngine: "hermes",
 
     orientation: "portrait",
-    icon: "./assets/images/LogoAli.png",
+    icon: "./assets/images/Icon.png",
     scheme: "BoraAli",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
@@ -44,7 +44,7 @@ export default {
     android: {
       package: "com.quebracar.transport",
 
-      versionCode: 2126,
+      versionCode: 2127,
 
       adaptiveIcon: {
         foregroundImage: "./assets/images/LogoAli.png",
